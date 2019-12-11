@@ -721,6 +721,7 @@ class NetworkController(object):
             cache_hit = self.model.cache[node].get(self.session['content'])
             if cache_hit:
                 if self.session['log']:
+                    print ("CACHE HIT--------------")
                     self.collector.cache_hit(node)
             else:
                 if self.session['log']:

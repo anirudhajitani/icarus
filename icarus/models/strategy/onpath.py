@@ -106,8 +106,8 @@ class OnPathEdge(Strategy):
                 #In case of more contents to be cached then allowed, it will use LRU to evict the first contents
                 for (x,y), value in np.ndenumerate(action):
                     if value == 1:
-                        if self.controller.get_content(self.view.model.routers[x],y) is False:
-                            self.controller.put_content(self.view.model.routers[x],y)
+                        if self.controller.get_content(self.view.model.routers[x],y+1) is False:
+                            self.controller.put_content(self.view.model.routers[x],y+1)
                             #negative reward for cache eviction and swapping
                             self.view.model.rewards -= 1
                 print ("AFTER ACTION TAKEN")
@@ -152,10 +152,10 @@ class OnPathEdge(Strategy):
                 except:
                     print ("ERROR HERE", v)
         # No caches on the path at all, get it from source
-        print ("Serving Node : ", c)
+        print ("Serving Node : ", serving_node)
         print ("Total Delay : ", min_delay_path)
         self.view.model.rewards -= min_delay_path
-        self.controller.get_content(c)
+        self.controller.get_content(serving_node)
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
         self.controller.forward_content_path(serving_node, receiver, path)

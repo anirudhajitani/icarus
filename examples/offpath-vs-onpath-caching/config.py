@@ -54,7 +54,8 @@ ALPHA = [0.6, 0.8, 1.0, 1.2]
 NETWORK_CACHE = [0.004, 0.002, 0.01, 0.05]
 
 # Number of content objects
-N_CONTENTS = 3 * 10 ** 5
+#N_CONTENTS = 3 * 10 ** 5
+N_CONTENTS = 10 ** 3
 
 # Number of requests per second (over the whole network)
 NETWORK_REQUEST_RATE = 12.0
@@ -118,8 +119,10 @@ for alpha in ALPHA:
             for network_cache in NETWORK_CACHE:
                 experiment = copy.deepcopy(default)
                 experiment['workload']['alpha'] = alpha
-                experiment['strategy']['name'] = strategy
+                #experiment['strategy']['name'] = strategy
+                experiment['strategy']['name'] = 'ON_PATH_EDGE' 
                 experiment['topology']['name'] = topology
+                #experiment['topology']['name'] = 'WIDE'
                 experiment['cache_placement']['network_cache'] = network_cache
                 experiment['desc'] = "Alpha: %s, strategy: %s, topology: %s, network cache: %s" \
                                      % (str(alpha), strategy, topology, str(network_cache))

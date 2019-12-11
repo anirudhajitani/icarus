@@ -327,13 +327,16 @@ class LatencyCollector(DataCollector):
     @inheritdoc(DataCollector)
     def end_session(self, success=True):
         if not success:
+            print ("LATENCY COLLECTOR NOT SUCCESS")
             return
         if self.cdf:
             self.latency_data.append(self.sess_latency)
         self.latency += self.sess_latency
+        print ("GOOD TILL HERE____1")
 
     @inheritdoc(DataCollector)
     def results(self):
+        print ("COLLECTOR RESULTS")
         results = Tree({'MEAN': self.latency / self.sess_count})
         if self.cdf:
             results['CDF'] = cdf(self.latency_data)
@@ -406,7 +409,9 @@ class CacheHitRatioCollector(DataCollector):
 
     @inheritdoc(DataCollector)
     def results(self):
+        print ("GOOD IN RESULTS CACHE_HIT")
         n_sess = self.cache_hits + self.serv_hits
+        print ("N_SESS", n_sess)
         hit_ratio = self.cache_hits / n_sess
         results = Tree(**{'MEAN': hit_ratio})
         if self.off_path_hits:
@@ -427,6 +432,7 @@ class CacheHitRatioCollector(DataCollector):
                 self.per_node_server_hits[v] /= n_sess
             results['PER_NODE_CACHE_HIT_RATIO'] = self.per_node_cache_hits
             results['PER_NODE_SERVER_HIT_RATIO'] = self.per_node_server_hits
+        print ("GOOD IN RESULTS CACHE_HIT END")
         return results
 
 

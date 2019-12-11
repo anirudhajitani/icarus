@@ -3,6 +3,7 @@ from __future__ import division
 import random
 
 import networkx as nx
+import numpy as np
 
 from icarus.registry import register_strategy
 from icarus.util import inheritdoc, path_links
@@ -11,6 +12,7 @@ from .base import Strategy
 
 __all__ = [
        'Partition',
+       'OnPathEdge',
        'Edge',
        'LeaveCopyEverywhere',
        'LeaveCopyDown',
@@ -63,6 +65,104 @@ class Partition(Strategy):
         self.controller.forward_content_path(cache, receiver)
         self.controller.end_session()
 
+
+@register_strategy('ON_PATH_EDGE')
+class OnPathEdge(Strategy):
+    """Edge caching strategy.
+    MAKE SURE CACHING POLICY IS LRU
+    In this strategy only a cache at the edge is looked up before forwarding
+    a content request to the original source.
+
+    In practice, this is like an LCE but it only queries the cache it
+    finds in the path. It is assumed to be used with a topology where each
+    PoP has a cache but it simulates a case where the cache is actually further
+    down the access network and it is not looked up for transit traffic passing
+    through the PoP but only for PoP-originated requests.
+    """
+
+    @inheritdoc(Strategy)
+    def __init__(self, view, controller):
+        super(OnPathEdge, self).__init__(view, controller)
+
+    @inheritdoc(Strategy)
+    def process_event(self, time, receiver, content, log):
+        # get all required data
+        print ("SESSION BEGIN")
+        print ("Process Event ", time, receiver, content)
+        source = self.view.content_source(content)
+        self.controller.start_session(time, receiver, content, log)
+        if self.view.count == 0 :
+            try:
+                #if not self.view.first :
+                self.view.update_q_table(self.view.model.rewards, 0.1, 0.9)
+                #else :
+                #    self.view.first = False
+                self.view.model.rewards = 0
+                #get state and action
+                print ("Before get action")
+                action = self.view.get_action()
+                print ("Action", action)
+                #cache the relevant contents (for now assume LRU eviction policy)
+                #In case of more contents to be cached then allowed, it will use LRU to evict the first contents
+                for (x,y), value in np.ndenumerate(action):
+                    if value == 1:
+                        if self.controller.get_content(self.view.model.routers[x],y) is False:
+                            self.controller.put_content(self.view.model.routers[x],y)
+                            #negative reward for cache eviction and swapping
+                            self.view.model.rewards -= 1
+                print ("AFTER ACTION TAKEN")
+                #perform the caching
+                #reset the popularity of the contents 
+                self.view.model.popularity *= 0
+                #self.view.get_state()
+            except:
+                print ("EROOR HEREEEEEEE")
+        self.view.count = (self.view.count + 1) % 100
+        content_loc = self.view.content_locations(content)
+        print ("Locations of content", content_loc)
+        min_delay_path = 1000000
+        min_path = []
+        for c in content_loc :
+            path = self.view.shortest_path(receiver, c)
+            print ("Path from rx to content location", path)
+            #print ("State : ", self.view.get_state())
+            # Route requests to original source and queries caches on the path
+            current_delay = 0
+            print ("Path Links", path_links(path))
+            for u, v in path_links(path):
+                print ("Link Delay", u, v, self.view.link_delay(u, v))
+                current_delay = current_delay + self.view.link_delay(u,v)
+                self.controller.forward_request_hop(u, v)
+                #print ("Cache dump of ", v , "is: ", self.view.cache_dump(v))
+            if current_delay < min_delay_path:
+                min_delay_path = current_delay
+                min_path = path
+                serving_node = c
+        print ("Min Path : ", min_path)
+        for u, v in path_links(min_path):
+            self.controller.forward_request_hop(u, v)
+            if self.view.has_cache(v) and v != source:
+                print (v, " has cache")
+                print ("Routers :", self.view.model.routers) 
+                try:
+                    print ("Inx", self.view.model.routers.index(v))
+                    print ("val", self.view.model.popularity[self.view.model.routers.index(v), content-1])
+                    self.view.model.popularity[self.view.model.routers.index(v), content-1] += 1.0
+                    print ("val after", self.view.model.popularity[self.view.model.routers.index(v), content-1])
+                except:
+                    print ("ERROR HERE", v)
+        # No caches on the path at all, get it from source
+        print ("Serving Node : ", c)
+        print ("Total Delay : ", min_delay_path)
+        self.view.model.rewards -= min_delay_path
+        self.controller.get_content(c)
+        # Return content
+        path = list(reversed(self.view.shortest_path(receiver, serving_node)))
+        self.controller.forward_content_path(serving_node, receiver, path)
+        #if serving_node == source:
+        #    self.controller.put_content(edge_cache)
+        self.controller.end_session()
+        print ("SESSION END")
 
 @register_strategy('EDGE')
 class Edge(Strategy):

@@ -90,7 +90,15 @@ class StationaryWorkload(object):
             raise ValueError('beta must be positive')
         self.receivers = [v for v in topology.nodes()
                      if topology.node[v]['stack'][0] == 'receiver']
+        print ("RX : ", self.receivers)
+        self.sources = [v for v in topology.nodes()
+                     if topology.node[v]['stack'][0] == 'source']
+        print ("SOURCE : ", self.sources)
+        self.routers = [v for v in topology.nodes()
+                     if topology.node[v]['stack'][0] == 'router']
+        print ("ROUTERS : ", self.routers)
         self.zipf = TruncatedZipfDist(alpha, n_contents)
+        #print ("ZIPF : ", self.zipf)
         self.n_contents = n_contents
         self.contents = range(1, n_contents + 1)
         self.alpha = alpha
@@ -116,6 +124,7 @@ class StationaryWorkload(object):
             content = int(self.zipf.rv())
             log = (req_counter >= self.n_warmup)
             event = {'receiver': receiver, 'content': content, 'log': log}
+            print ("EVENT : ", event)
             yield (t_event, event)
             req_counter += 1
         raise StopIteration()

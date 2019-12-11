@@ -55,7 +55,9 @@ def exec_experiment(topology, workload, netconf, strategy, cache_policy, collect
     strategy_name = strategy['name']
     strategy_args = {k: v for k, v in strategy.items() if k != 'name'}
     strategy_inst = STRATEGY[strategy_name](view, controller, **strategy_args)
-
+    i = 0
     for time, event in workload:
         strategy_inst.process_event(time, **event)
+        print("ITER_", i)
+        i += 1
     return collector.results()

@@ -42,22 +42,22 @@ experiment = Tree()
 
 # Set topology
 experiment['topology']['name'] = 'PATH'
-experiment['topology']['n'] = 10
+experiment['topology']['n'] = 4
 experiment['topology']['delay'] = 10
 
 # Set workload
 experiment['workload'] = {
          'name':       'STATIONARY',
-         'n_contents': 10 ** 5,
-         'n_warmup':   10 ** 2,
-         'n_measured': 4 * 10 ** 2,
+         'n_contents': 5,
+         'n_warmup':   10 ** 4,
+         'n_measured': 4 * 10 ** 4,
          'alpha':      1.0,
          'rate':       1
                        }
 
 # Set cache placement
 experiment['cache_placement']['name'] = 'UNIFORM'
-experiment['cache_placement']['network_cache'] = 0.01
+experiment['cache_placement']['network_cache'] = 0.5
 
 # Set content placement
 experiment['content_placement']['name'] = 'UNIFORM'
@@ -66,7 +66,7 @@ experiment['content_placement']['name'] = 'UNIFORM'
 experiment['cache_policy']['name'] = 'LRU'
 
 # Set caching meta-policy
-experiment['strategy']['name'] = 'LCE'
+experiment['strategy']['name'] = 'ON_PATH_EDGE'
 
 # Description of the experiment
 experiment['desc'] = "Line topology with 10 nodes"

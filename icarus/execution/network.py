@@ -16,6 +16,9 @@ import logging
 
 import networkx as nx
 import fnss
+import numpy as np
+import math
+import sys
 
 from icarus.registry import CACHE_POLICY
 from icarus.util import iround, path_links
@@ -76,6 +79,110 @@ class NetworkView(object):
             raise ValueError('The model argument must be an instance of '
                              'NetworkModel')
         self.model = model
+        self.count = 0
+        self.first = True
+        print ("NW VIEW INIT")
+
+    def get_state(self):
+        print ("INSIDE GET STATE")
+        for r in self.model.routers :
+            contents = self.cache_dump(r)
+            print ("R C", r, contents)
+            for c in contents :
+                self.model.state[self.model.routers.index(r), c-1] = 1.0
+                print ("val ", self.model.state[self.model.routers.index(r), c-1])
+        #add popularity
+        self.calculate_popularity()
+        print ("STATE ::: ", self.model.state)
+        print ("POPS ", self.model.popularity)
+        self.current_state = np.concatenate((self.model.state, self.model.popularity), axis=1)
+        return self.current_state
+
+    def calculate_popularity(self):
+            self.model.popularity /= 100.0
+
+    """ 
+    def encode_state(self):
+        expo = 0
+        encoding_2 = 0
+        state_matrix = self.get_state()
+        for x in xrange(state_matrix.shape[0]/2):
+            for y in xrange(state_matrix.shape[1]):
+                encoding_2 += state_matrix[x, y] * (2 ** expo)
+                expo += 1
+        encoding = encoding_2 * (3 ** (state_matrix.shape[0]/2 * state_matrix.shape[1]))
+        expo = 0
+        encoding_3 = 0
+        for x in range(state_matrix.shape[0]/2, state_matrix.shape[0]):
+            for y in xrange(state_matrix.shape[1]):
+                encoding_3 += math.floor(state_matrix[x,y] * 3) * (3 ** expo)    
+                expo += 1
+        encoding += encoding_3
+        return encoding
+    """
+
+    def encode_state(self, state=None):
+        print ("INSIDE ENCODE STATE")
+        expo = 0
+        encoding = 0
+        if state is None:
+            state_matrix = self.get_state()
+        else :
+            state_matrix = state
+        for (x,y), value in np.ndenumerate(state_matrix):
+            if x < state_matrix.shape[0]/2 :
+                encoding += value * (2 ** expo)
+            else :
+                if value > 0.08:
+                    encoding += (2 ** expo)
+            expo += 1
+        print ("STATE ENCODING :: ", int(encoding))
+        return int(encoding)
+
+    def encode_action(self, action_matrix):
+        expo = 0
+        encoding = 0
+        for (x,y), value in np.ndenumerate(action_matrix):
+             encoding += value * (2 ** expo)
+             expo += 1
+        print ("ACTION ENCODING :: ", encoding)
+        return encoding
+
+    """
+    def decode_state(self, encoding):
+        state_matrix = np.full((len(self.model.routers), 2 * len(self.model.library)), 0, dtype=int)
+    """
+
+    def decode_action(self, encoding):
+        action_matrix = np.full((len(self.model.routers), len(self.model.library)), 0, dtype=int)
+        for x in range(action_matrix.shape[0]):
+            for y in range(action_matrix.shape[1]):
+                action_matrix[x,y] = encoding % 2
+                encoding = encoding // 2
+        print ("DECODED ACTION :: ", action_matrix)
+        return action_matrix
+
+    def get_action(self):
+        print ("INSIDE GET ACTION")
+        #state = self.encode_state()
+        state = self.encode_state(self.current_state)
+        print ("MAX ACTION", np.argmax(self.model.q_table[state, :]))
+        self.current_action = np.argmax(self.model.q_table[state, :])
+        action = self.decode_action(self.current_action)
+        return action
+        #take action and get rewards
+        #next state computed by current action and popularity matrix as it is as previous state
+
+    def update_q_table(self, rewards, alpha, gamma): 
+        print ("UPDATE Q TABLE START")
+        if self.first is True:
+            self.first = False
+            x = self.get_state()
+            return
+        old_state = self.encode_state(self.current_state)
+        next_state = self.encode_state()
+        self.model.q_table[(old_state, self.current_action)] = (1.0 - alpha) * self.model.q_table[(old_state, self.current_action)] + alpha * ((rewards + gamma * np.max(self.model.q_table[next_state,:]) - self.model.q_table[old_state, self.current_action]))
+        print ("UPDATE Q TABLE END")
 
     def content_locations(self, k):
         """Return a set of all current locations of a specific content.
@@ -355,9 +462,10 @@ class NetworkModel(object):
         # Dictionary mapping each content object to its source
         # dict of location of contents keyed by content ID
         self.content_source = {}
+        self.library = set()
         # Dictionary mapping the reverse, i.e. nodes to set of contents stored
         self.source_node = {}
-
+        self.routers = []
         # Dictionary of link types (internal/external)
         self.link_type = nx.get_edge_attributes(topology, 'type')
         self.link_delay = fnss.get_delays(topology)
@@ -377,10 +485,12 @@ class NetworkModel(object):
             if stack_name == 'router':
                 if 'cache_size' in stack_props:
                     cache_size[node] = stack_props['cache_size']
+                    self.routers.append(node)
             elif stack_name == 'source':
                 contents = stack_props['contents']
                 self.source_node[node] = contents
                 for content in contents:
+                    self.library.add(content)
                     self.content_source[content] = node
         if any(c < 1 for c in cache_size.values()):
             logger.warn('Some content caches have size equal to 0. '
@@ -388,7 +498,27 @@ class NetworkModel(object):
             for node in cache_size:
                 if cache_size[node] < 1:
                     cache_size[node] = 1
-
+        print ("CACHES", self.routers)
+        print ("LIBRARY LEN", len(self.library))
+        self.rewards = 0
+        self.state = np.full((len(self.routers), len(self.library)), 0.0, dtype=float)
+        self.actions = np.full((len(self.routers), len(self.library)), 0, dtype=int)
+        self.popularity = np.full((len(self.routers), len(self.library)), 0.0, dtype=float)
+        print ("FIne before q-table")
+        """
+        #DIFF DIMS
+        dimension_1 = (2 ** (len(self.routers) * len(self.library))) * (3 ** (len(self.routers) * len(self.library)))
+        dimension_2 = (2 ** (len(self.routers) * len(self.library)))
+        print ("DImensions", dimension_1, dimension_2)
+        """
+        dimension_1 = (2 ** (len(self.routers) * 2 * len(self.library)))
+        dimension_2 = (2 ** (len(self.routers) * len(self.library)))
+        try :
+            #self.q_table = np.full((dimension_1, dimension_2), 0.0, dtype=float)
+            self.q_table = np.full((dimension_1, dimension_2), 0.0, dtype=float)
+        except :
+            print ("Error: ", sys.exc_info()[0])
+        print ("INIT OF RL COMP DONE")
         policy_name = cache_policy['name']
         policy_args = {k: v for k, v in cache_policy.items() if k != 'name'}
         # The actual cache objects storing the content
@@ -547,7 +677,7 @@ class NetworkController(object):
         if self.collector is not None and self.session['log']:
             self.collector.content_hop(u, v, main_path)
 
-    def put_content(self, node):
+    def put_content(self, node, content=None):
         """Store content in the specified node.
 
         The node must have a cache stack and the actual insertion of the
@@ -565,10 +695,13 @@ class NetworkController(object):
         evicted : any hashable type
             The evicted object or *None* if no contents were evicted.
         """
-        if node in self.model.cache:
+        print ("INSIDE PUT CONTENT")
+        if node in self.model.cache and content is None:
             return self.model.cache[node].put(self.session['content'])
+        if node in self.model.cache and content is not None:
+            return self.model.cache[node].put(content)
 
-    def get_content(self, node):
+    def get_content(self, node, content=None):
         """Get a content from a server or a cache.
 
         Parameters
@@ -581,6 +714,9 @@ class NetworkController(object):
         content : bool
             True if the content is available, False otherwise
         """
+        print ("INSIDE GET CONTENT")
+        if node in self.model.cache and content is not None:
+            return self.model.cache[node].get(content)
         if node in self.model.cache:
             cache_hit = self.model.cache[node].get(self.session['content'])
             if cache_hit:

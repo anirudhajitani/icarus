@@ -85,7 +85,7 @@ class NetworkView(object):
         print ("NW VIEW INIT")
 
     def get_state(self, r):
-        print ("INSIDE GET STATE")
+        #print ("INSIDE GET STATE")
         #for r in self.model.routers :
         contents = self.cache_dump(r)
         inx = self.model.routers.index(r)
@@ -96,8 +96,8 @@ class NetworkView(object):
         #add popularity
         #print ("STATE ::: ", self.model.state)
         #print ("POPS ", self.model.popularity)
-        state = np.concatenate((self.model.state[inx,:], self.model.popularity[inx,:]))
-        print ("SHAPE OF STATE", state.shape)
+        state = np.concatenate((self.model.state[inx,:], self.model.popularity[inx,:]/self.count))
+        #print ("SHAPE OF STATE", state.shape)
         return self.model.state[inx,:], state
 
     """
@@ -106,7 +106,7 @@ class NetworkView(object):
     """
 
     def encode_state(self, r):
-        print ("INSIDE ENCODE STATE")
+        #print ("INSIDE ENCODE STATE")
         expo = 0
         encoding_2 = 0
         contents, state_matrix = self.get_state(r)
@@ -144,7 +144,7 @@ class NetworkView(object):
         return int(encoding)
     """
     def encode_action(self, action_matrix):
-        print ("INSIDE ENCODE ACTION", action_matrix.shape[0])
+        #print ("INSIDE ENCODE ACTION", action_matrix.shape[0])
         expo = 0
         encoding = 0
         for x in range(int(action_matrix.shape[0])):
@@ -159,7 +159,7 @@ class NetworkView(object):
     """
 
     def decode_action(self, encoding):
-        print ("INSIDE DECODE ACTION")
+        #print ("INSIDE DECODE ACTION")
         action_matrix = np.full((len(self.model.library)), 0, dtype=int)
         for x in range(int(action_matrix.shape[0])):
             action_matrix[x] = encoding % 2
@@ -720,7 +720,7 @@ class NetworkController(object):
         evicted : any hashable type
             The evicted object or *None* if no contents were evicted.
         """
-        print ("INSIDE PUT CONTENT")
+        #print ("INSIDE PUT CONTENT")
         if node in self.model.cache and content is None:
             return self.model.cache[node].put(self.session['content'])
         if node in self.model.cache and content is not None:
@@ -739,7 +739,7 @@ class NetworkController(object):
         content : bool
             True if the content is available, False otherwise
         """
-        print ("INSIDE GET CONTENT")
+        #print ("INSIDE GET CONTENT")
         if node in self.model.cache and content is not None:
             return self.model.cache[node].get(content)
         if node in self.model.cache:
@@ -773,7 +773,7 @@ class NetworkController(object):
         removed : bool
             *True* if the entry was in the cache, *False* if it was not.
         """
-        print ("INSIDE REMOVE CONTENT")
+        #print ("INSIDE REMOVE CONTENT")
         if node in self.model.cache and content is not None:
             return self.model.cache[node].remove(content)
         if node in self.model.cache:

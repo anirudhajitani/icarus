@@ -89,7 +89,7 @@ class CentralizedRL(Strategy):
     @inheritdoc(Strategy)
     def process_event(self, time, receiver, content, log):
         # get all required data
-        print ("SESSION BEGIN")
+        #print ("SESSION BEGIN")
         print ("Process Event ", time, receiver, content)
         source = self.view.content_source(content)
         self.controller.start_session(time, receiver, content, log)
@@ -101,7 +101,7 @@ class CentralizedRL(Strategy):
                 #    self.view.first = False
                 self.view.model.rewards = 0
                 #get state and action
-                print ("Before get action")
+                #print ("Before get action")
                 action = self.view.get_action()
                 print ("Action", action)
                 #cache the relevant contents (for now assume LRU eviction policy)
@@ -188,11 +188,12 @@ class DecRL(Strategy):
     @inheritdoc(Strategy)
     def process_event(self, time, receiver, content, log):
         # get all required data
-        print ("SESSION BEGIN")
+        #print ("SESSION BEGIN")
         print ("Process Event ", time, receiver, content)
         alpha = 0.1
         gamma = 0.9
         source = self.view.content_source(content)
+        self.view.count += 1
         self.controller.start_session(time, receiver, content, log)
         old_state = []
         actions = []
@@ -220,9 +221,10 @@ class DecRL(Strategy):
                         print ("VALID ACTION", self.view.encode_action(np.array(m)))
             print ("Max action of ", self.view.model.routers.index(r),state,valid_actions)
             max_action = np.argmax(self.view.model.q_table[self.view.model.routers.index(r),state,valid_actions])
-            print ("MAX ACTION", valid_actions[max_action]) 
+            print ("MAX ACTION ENCODED", valid_actions[max_action])
             actions.append(valid_actions[max_action])
             max_action_matrix = self.view.decode_action(max_action)
+            print ("MAX ACTION", max_action_matrix) 
             #put contents in the cache
             for x in range(max_action_matrix.shape[0]):
                 if max_action_matrix[x] == 1:
@@ -233,7 +235,7 @@ class DecRL(Strategy):
                     if self.controller.get_content(r, x+1) is True:
                         self.controller.remove_content(r, x+1)
                         rewards[self.view.model.routers.index(r)] -= 1
-            self.view.model.popularity *= 0
+            #self.view.model.popularity *= 0
         
         content_loc = self.view.content_locations(content)
         print ("Locations of content", content_loc)
@@ -259,12 +261,15 @@ class DecRL(Strategy):
         for u, v in path_links(min_path):
             self.controller.forward_request_hop(u, v)
             if self.view.has_cache(v) and v != source:
-                print (v, " has cache")
-                print ("Routers :", self.view.model.routers) 
+                #print (v, " has cache")
+                #print ("Routers :", self.view.model.routers) 
                 try:
                     print ("Inx", self.view.model.routers.index(v))
                     print ("val", self.view.model.popularity[self.view.model.routers.index(v), content-1])
-                    self.view.model.popularity[self.view.model.routers.index(v), content-1] += 1.0
+                    #if self.view.count == 1:
+                    self.view.model.popularity[self.view.model.routers.index(v), content-1] += 1
+                    #else:
+                    #    self.view.model.popularity[self.view.model.routers.index(v), content-1] = (self.view.model.popularity[self.view.model.routers.index(v), content-1] / float(self.view.count - 1) + 1.0) / float(self.view.count)
                     print ("val after", self.view.model.popularity[self.view.model.routers.index(v), content-1])
                 except:
                     print ("ERROR HERE", v)
@@ -276,12 +281,14 @@ class DecRL(Strategy):
         #get maximum of those actions
         #update q_table accordingly
         rewards += common_reward
-        #print ("REWARDS MATRIX", rewards)
+        print ("REWARDS MATRIX", rewards)
         for r in range(len(self.view.model.routers)):
             #contents, state = self.view.get_state(self.view.model.routers[r])
             next_state = self.view.encode_state(self.view.model.routers[r])
+            print ("Q-val before", self.view.model.q_table[r, old_state[r], actions[r]])
             self.view.model.q_table[r, old_state[r], actions[r]] = (1.0 - alpha) * self.view.model.q_table[r, old_state[r], actions[r]] + alpha * ((rewards[r] + gamma * np.max(self.view.model.q_table[r, next_state,:]) - self.view.model.q_table[r, old_state[r], actions[r]]))
-
+            print ("Q-val after", self.view.model.q_table[r, old_state[r], actions[r]])
+        print ("Q TABLE ", self.view.model.q_table)
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
         self.controller.forward_content_path(serving_node, receiver, path)
         #if serving_node == source:

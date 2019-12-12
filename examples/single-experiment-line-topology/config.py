@@ -66,7 +66,7 @@ experiment['content_placement']['name'] = 'UNIFORM'
 experiment['cache_policy']['name'] = 'LRU'
 
 # Set caching meta-policy
-experiment['strategy']['name'] = 'ON_PATH_EDGE'
+experiment['strategy']['name'] = 'DEC_RL'
 
 # Description of the experiment
 experiment['desc'] = "Line topology with 10 nodes"

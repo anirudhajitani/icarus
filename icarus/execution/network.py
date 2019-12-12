@@ -84,44 +84,47 @@ class NetworkView(object):
         #self.valid_actions()
         print ("NW VIEW INIT")
 
-    def get_state(self):
+    def get_state(self, r):
         print ("INSIDE GET STATE")
-        for r in self.model.routers :
-            contents = self.cache_dump(r)
-            print ("R C", r, contents)
-            for c in contents :
-                self.model.state[self.model.routers.index(r), c-1] = 1.0
-                print ("val ", self.model.state[self.model.routers.index(r), c-1])
+        #for r in self.model.routers :
+        contents = self.cache_dump(r)
+        inx = self.model.routers.index(r)
+        print ("R C", r, contents)
+        for c in contents :
+            self.model.state[inx, c-1] = 1.0
+            print ("val ", self.model.state[inx, c-1])
         #add popularity
-        self.calculate_popularity()
-        print ("STATE ::: ", self.model.state)
-        print ("POPS ", self.model.popularity)
-        self.current_state = np.concatenate((self.model.state, self.model.popularity), axis=1)
-        return self.current_state
+        #print ("STATE ::: ", self.model.state)
+        #print ("POPS ", self.model.popularity)
+        state = np.concatenate((self.model.state[inx,:], self.model.popularity[inx,:]))
+        print ("SHAPE OF STATE", state.shape)
+        return self.model.state[inx,:], state
 
+    """
     def calculate_popularity(self):
             self.model.popularity /= 100.0
-
-    """ 
-    def encode_state(self):
-        expo = 0
-        encoding_2 = 0
-        state_matrix = self.get_state()
-        for x in xrange(state_matrix.shape[0]/2):
-            for y in xrange(state_matrix.shape[1]):
-                encoding_2 += state_matrix[x, y] * (2 ** expo)
-                expo += 1
-        encoding = encoding_2 * (3 ** (state_matrix.shape[0]/2 * state_matrix.shape[1]))
-        expo = 0
-        encoding_3 = 0
-        for x in range(state_matrix.shape[0]/2, state_matrix.shape[0]):
-            for y in xrange(state_matrix.shape[1]):
-                encoding_3 += math.floor(state_matrix[x,y] * 3) * (3 ** expo)    
-                expo += 1
-        encoding += encoding_3
-        return encoding
     """
 
+    def encode_state(self, r):
+        print ("INSIDE ENCODE STATE")
+        expo = 0
+        encoding_2 = 0
+        contents, state_matrix = self.get_state(r)
+        print ("loop term at ", state_matrix.shape[0]/2)
+        for x in range(int(state_matrix.shape[0]/2)):
+                encoding_2 += state_matrix[x] * (2 ** expo)
+                expo += 1
+        encoding = encoding_2 * (3 ** (state_matrix.shape[0]/2))
+        expo = 0
+        encoding_3 = 0
+        for x in range(int(state_matrix.shape[0]/2), int(state_matrix.shape[0])):
+                encoding_3 += math.floor(state_matrix[x] * 3) * (3 ** expo)    
+                expo += 1
+        encoding += encoding_3
+        print ("STATE ENCODING :: ", int(encoding))
+        return int(encoding)
+
+    """
     def encode_state(self, state=None):
         print ("INSIDE ENCODE STATE")
         expo = 0
@@ -139,12 +142,13 @@ class NetworkView(object):
             expo += 1
         print ("STATE ENCODING :: ", int(encoding))
         return int(encoding)
-
+    """
     def encode_action(self, action_matrix):
+        print ("INSIDE ENCODE ACTION", action_matrix.shape[0])
         expo = 0
         encoding = 0
-        for (x,y), value in np.ndenumerate(action_matrix):
-             encoding += value * (2 ** expo)
+        for x in range(int(action_matrix.shape[0])):
+             encoding += action_matrix[x] * (2 ** expo)
              expo += 1
         print ("ACTION ENCODING :: ", encoding)
         return encoding
@@ -156,14 +160,14 @@ class NetworkView(object):
 
     def decode_action(self, encoding):
         print ("INSIDE DECODE ACTION")
-        action_matrix = np.full((len(self.model.routers), len(self.model.library)), 0, dtype=int)
-        for x in range(action_matrix.shape[0]):
-            for y in range(action_matrix.shape[1]):
-                action_matrix[x,y] = encoding % 2
-                encoding = encoding // 2
+        action_matrix = np.full((len(self.model.library)), 0, dtype=int)
+        for x in range(int(action_matrix.shape[0])):
+            action_matrix[x] = encoding % 2
+            encoding = encoding // 2
         print ("DECODED ACTION :: ", action_matrix)
         return action_matrix
 
+    """
     def valid_actions(self):
         for i in range(self.model.q_table.shape[1]):
             action = self.decode_action(i)
@@ -178,7 +182,8 @@ class NetworkView(object):
                     self.model.q_table[:,i] = -1e6
                     print ("Invalid actions : ", i, action)
                     break 
-
+    """
+    """
     def get_action(self):
         print ("INSIDE GET ACTION")
         #state = self.encode_state()
@@ -201,7 +206,7 @@ class NetworkView(object):
         next_state = self.encode_state()
         self.model.q_table[old_state, self.current_action] = (1.0 - alpha) * self.model.q_table[old_state, self.current_action] + alpha * ((rewards + gamma * np.max(self.model.q_table[next_state,:]) - self.model.q_table[old_state, self.current_action]))
         print ("UPDATE Q TABLE END")
-
+    """
     def content_locations(self, k):
         """Return a set of all current locations of a specific content.
 
@@ -519,7 +524,7 @@ class NetworkModel(object):
         print ("CACHES", self.routers)
         print ("LIBRARY LEN", len(self.library))
         self.rewards = 0
-        self.state = np.full((len(self.routers), len(self.library)), 0.0, dtype=float)
+        self.state = np.full((len(self.routers), len(self.library)), 0, dtype=int)
         self.actions = np.full((len(self.routers), len(self.library)), 0, dtype=int)
         self.popularity = np.full((len(self.routers), len(self.library)), 0.0, dtype=float)
         print ("FIne before q-table")
@@ -529,13 +534,13 @@ class NetworkModel(object):
         dimension_2 = (2 ** (len(self.routers) * len(self.library)))
         print ("DImensions", dimension_1, dimension_2)
         """
-        dimension_1 = (2 ** (len(self.routers) * 2 * len(self.library)))
-        dimension_2 = (2 ** (len(self.routers) * len(self.library)))
+        #dimension_1 = (2 ** (len(self.routers) * 2 * len(self.library)))
+        #dimension_2 = (2 ** (len(self.routers) * len(self.library)))
         print ("DIms done")
         try :
             #self.q_table = np.full((dimension_1, dimension_2), 0.0, dtype=float)
-            self.q_table = np.full((dimension_1, dimension_2), 0.0, dtype=float)
-            print ("Q-table done")
+            self.q_table = np.full((len(self.routers), 2 ** len(self.library) * 3 ** len(self.library), 2 ** len(self.library)), 0.0, dtype=float)
+            print ("Q-table done", self.q_table.shape)
         except :
             print ("Error: ", sys.exc_info()[0])
         print ("INIT OF RL COMP DONE")
@@ -755,7 +760,7 @@ class NetworkController(object):
         else:
             return False
 
-    def remove_content(self, node):
+    def remove_content(self, node, content=None):
         """Remove the content being handled from the cache
 
         Parameters
@@ -768,6 +773,9 @@ class NetworkController(object):
         removed : bool
             *True* if the entry was in the cache, *False* if it was not.
         """
+        print ("INSIDE REMOVE CONTENT")
+        if node in self.model.cache and content is not None:
+            return self.model.cache[node].remove(content)
         if node in self.model.cache:
             return self.model.cache[node].remove(self.session['content'])
 

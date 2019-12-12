@@ -107,15 +107,15 @@ class NetworkView(object):
         expo = 0
         encoding_2 = 0
         state_matrix = self.get_state()
-        for x in xrange(state_matrix.shape[0]/2):
-            for y in xrange(state_matrix.shape[1]):
+        for x in xrange(state_matrix.shape[0]):
+            for y in xrange(int(state_matrix.shape[1]/2)):
                 encoding_2 += state_matrix[x, y] * (2 ** expo)
                 expo += 1
-        encoding = encoding_2 * (3 ** (state_matrix.shape[0]/2 * state_matrix.shape[1]))
+        encoding = encoding_2 * (3 ** (state_matrix.shape[0] * state_matrix.shape[1]/2))
         expo = 0
         encoding_3 = 0
-        for x in range(state_matrix.shape[0]/2, state_matrix.shape[0]):
-            for y in xrange(state_matrix.shape[1]):
+        for x in range(state_matrix.shape[0]):
+            for y in xrange(int(state_matrix.shape[1]/2), state_matrix.shape[1]):
                 encoding_3 += math.floor(state_matrix[x,y] * 3) * (3 ** expo)    
                 expo += 1
         encoding += encoding_3
@@ -131,7 +131,7 @@ class NetworkView(object):
         else :
             state_matrix = state
         for (x,y), value in np.ndenumerate(state_matrix):
-            if x < state_matrix.shape[0]/2 :
+            if y < int(state_matrix.shape[1]/2) :
                 encoding += value * (2 ** expo)
             else :
                 if value > 0.2:
@@ -755,7 +755,7 @@ class NetworkController(object):
         else:
             return False
 
-    def remove_content(self, node):
+    def remove_content(self, node, content=None):
         """Remove the content being handled from the cache
 
         Parameters
@@ -768,6 +768,8 @@ class NetworkController(object):
         removed : bool
             *True* if the entry was in the cache, *False* if it was not.
         """
+        if node in self.model.cache and content is not None:
+            return self.model.cache[node].remove(content)
         if node in self.model.cache:
             return self.model.cache[node].remove(self.session['content'])
 

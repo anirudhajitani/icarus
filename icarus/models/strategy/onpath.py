@@ -110,6 +110,9 @@ class OnPathEdge(Strategy):
                             self.controller.put_content(self.view.model.routers[x],y+1)
                             #negative reward for cache eviction and swapping
                             self.view.model.rewards -= 1
+                    else:
+                        if self.controller.get_content(self.view.model.routers[x],y+1) is True:
+                            self.controller.remove_content(self.view.model.routers[x],y+1)
                 print ("AFTER ACTION TAKEN")
                 #perform the caching
                 #reset the popularity of the contents 
@@ -140,7 +143,7 @@ class OnPathEdge(Strategy):
                 serving_node = c
         print ("Min Path : ", min_path)
         for u, v in path_links(min_path):
-            self.controller.forward_request_hop(u, v)
+            #self.controller.forward_request_hop(u, v)
             if self.view.has_cache(v) and v != source:
                 print (v, " has cache")
                 print ("Routers :", self.view.model.routers) 

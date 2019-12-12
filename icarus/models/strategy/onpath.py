@@ -208,6 +208,8 @@ class DecRL(Strategy):
             cache_len = self.view.model.cache[r].maxlen
             print ("MAX CACHE LEN FOR ", r, " is ", cache_len)
             print ("CONTENTS", contents, contents.shape[0])
+            #append current state too (i.e. take no action)
+            valid_actions.append(self.view.encode_action(contents))
             if contents[content - 1] == 0 :
                 all_comb = [list(i) for i in itertools.product([0, 1], repeat=contents.shape[0])]
                 #print ("ALL COMB", all_comb)
@@ -218,8 +220,8 @@ class DecRL(Strategy):
                         print ("VALID ACTION", self.view.encode_action(np.array(m)))
             print ("Max action of ", self.view.model.routers.index(r),state,valid_actions)
             max_action = np.argmax(self.view.model.q_table[self.view.model.routers.index(r),state,valid_actions])
-            print ("MAX ACTION", max_action, type(max_action))
-            actions.append(max_action)
+            print ("MAX ACTION", valid_actions[max_action]) 
+            actions.append(valid_actions[max_action])
             max_action_matrix = self.view.decode_action(max_action)
             #put contents in the cache
             for x in range(max_action_matrix.shape[0]):

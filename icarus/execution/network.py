@@ -81,6 +81,7 @@ class NetworkView(object):
         self.model = model
         self.count = 0
         self.first = True
+        #self.valid_actions()
         print ("NW VIEW INIT")
 
     def get_state(self):
@@ -133,7 +134,7 @@ class NetworkView(object):
             if x < state_matrix.shape[0]/2 :
                 encoding += value * (2 ** expo)
             else :
-                if value > 0.08:
+                if value > 0.2:
                     encoding += (2 ** expo)
             expo += 1
         print ("STATE ENCODING :: ", int(encoding))
@@ -154,6 +155,7 @@ class NetworkView(object):
     """
 
     def decode_action(self, encoding):
+        print ("INSIDE DECODE ACTION")
         action_matrix = np.full((len(self.model.routers), len(self.model.library)), 0, dtype=int)
         for x in range(action_matrix.shape[0]):
             for y in range(action_matrix.shape[1]):
@@ -161,6 +163,21 @@ class NetworkView(object):
                 encoding = encoding // 2
         print ("DECODED ACTION :: ", action_matrix)
         return action_matrix
+
+    def valid_actions(self):
+        for i in range(self.model.q_table.shape[1]):
+            action = self.decode_action(i)
+            for x in range(action.shape[0]):
+                print ("Max-cache len ", self.model.cache[self.model.routers[x]].maxlen)
+                count = 0
+                for y in range(action.shape[1]):
+                    print ("ACTION VAL", action[x,y])
+                    count += action[x,y]
+                print ("Count for ",x, " is ", count)
+                if count <= self.model.cache[self.model.routers[x]].maxlen - 1 or count > self.model.cache[self.model.routers[x]].maxlen :
+                    self.model.q_table[:,i] = -1e6
+                    print ("Invalid actions : ", i, action)
+                    break 
 
     def get_action(self):
         print ("INSIDE GET ACTION")
@@ -177,11 +194,12 @@ class NetworkView(object):
         print ("UPDATE Q TABLE START")
         if self.first is True:
             self.first = False
+            self.valid_actions()
             x = self.get_state()
             return
         old_state = self.encode_state(self.current_state)
         next_state = self.encode_state()
-        self.model.q_table[(old_state, self.current_action)] = (1.0 - alpha) * self.model.q_table[(old_state, self.current_action)] + alpha * ((rewards + gamma * np.max(self.model.q_table[next_state,:]) - self.model.q_table[old_state, self.current_action]))
+        self.model.q_table[old_state, self.current_action] = (1.0 - alpha) * self.model.q_table[old_state, self.current_action] + alpha * ((rewards + gamma * np.max(self.model.q_table[next_state,:]) - self.model.q_table[old_state, self.current_action]))
         print ("UPDATE Q TABLE END")
 
     def content_locations(self, k):
@@ -513,9 +531,11 @@ class NetworkModel(object):
         """
         dimension_1 = (2 ** (len(self.routers) * 2 * len(self.library)))
         dimension_2 = (2 ** (len(self.routers) * len(self.library)))
+        print ("DIms done")
         try :
             #self.q_table = np.full((dimension_1, dimension_2), 0.0, dtype=float)
             self.q_table = np.full((dimension_1, dimension_2), 0.0, dtype=float)
+            print ("Q-table done")
         except :
             print ("Error: ", sys.exc_info()[0])
         print ("INIT OF RL COMP DONE")

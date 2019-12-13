@@ -104,12 +104,19 @@ class OnPathEdge(Strategy):
                 print ("Action", action)
                 #cache the relevant contents (for now assume LRU eviction policy)
                 #In case of more contents to be cached then allowed, it will use LRU to evict the first contents
+                #Need to forward request to incur latency to get the data
+                #TODO optimize further to reduce latency
                 for (x,y), value in np.ndenumerate(action):
                     if value == 1:
                         if self.controller.get_content(self.view.model.routers[x],y+1) is False:
+                            #need to fetch content to put it
+                            self.controller.forward_request_path(self.view.model.routers[x], self.view.content_source(y+1))
+                            self.controller.forward_content_path(self.view.content_source(y+1),self.view.model.routers[x])
+                            path = self.view.shortest_path(self.view.model.routers[x], self.view.content_source(y+1))
+                            for u, v in path_links(path):
+                                self.view.model.rewards -= self.view.link_delay(u,v)
                             self.controller.put_content(self.view.model.routers[x],y+1)
                             #negative reward for cache eviction and swapping
-                            self.view.model.rewards -= 1
                     else:
                         if self.controller.get_content(self.view.model.routers[x],y+1) is True:
                             self.controller.remove_content(self.view.model.routers[x],y+1)

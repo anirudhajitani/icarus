@@ -90,6 +90,7 @@ class NetworkView(object):
         contents = self.cache_dump(r)
         inx = self.model.routers.index(r)
         print ("R C", r, contents)
+        self.model.state *= 0
         for c in contents :
             self.model.state[inx, c-1] = 1.0
             print ("val ", self.model.state[inx, c-1])
@@ -97,7 +98,7 @@ class NetworkView(object):
         #print ("STATE ::: ", self.model.state)
         #print ("POPS ", self.model.popularity)
         state = np.concatenate((self.model.state[inx,:], self.model.popularity[inx,:]/self.count))
-        #print ("SHAPE OF STATE", state.shape)
+        print ("STATE", state)
         return self.model.state[inx,:], state
 
     """

@@ -215,15 +215,15 @@ class DecRL(Strategy):
                 all_comb = [list(i) for i in itertools.product([0, 1], repeat=contents.shape[0])]
                 #print ("ALL COMB", all_comb)
                 for m in all_comb:
-                    #print ("COMB ", m)
                     if m[content - 1] == 1 and np.sum(m) == cache_len :
                         valid_actions.append(self.view.encode_action(np.array(m)))
+                        print ("COMB ", m)
                         print ("VALID ACTION", self.view.encode_action(np.array(m)))
             print ("Max action of ", self.view.model.routers.index(r),state,valid_actions)
             max_action = np.argmax(self.view.model.q_table[self.view.model.routers.index(r),state,valid_actions])
             print ("MAX ACTION ENCODED", valid_actions[max_action])
             actions.append(valid_actions[max_action])
-            max_action_matrix = self.view.decode_action(max_action)
+            max_action_matrix = self.view.decode_action(valid_actions[max_action])
             print ("MAX ACTION", max_action_matrix) 
             #put contents in the cache
             for x in range(max_action_matrix.shape[0]):
@@ -286,7 +286,9 @@ class DecRL(Strategy):
             #contents, state = self.view.get_state(self.view.model.routers[r])
             next_state = self.view.encode_state(self.view.model.routers[r])
             print ("Q-val before", self.view.model.q_table[r, old_state[r], actions[r]])
-            self.view.model.q_table[r, old_state[r], actions[r]] = (1.0 - alpha) * self.view.model.q_table[r, old_state[r], actions[r]] + alpha * ((rewards[r] + gamma * np.max(self.view.model.q_table[r, next_state,:]) - self.view.model.q_table[r, old_state[r], actions[r]]))
+            print ((1.0 - alpha) * self.view.model.q_table[r, old_state[r], actions[r]])
+            print ((rewards[r] + gamma * np.max(self.view.model.q_table[r, next_state,:]) - self.view.model.q_table[r, old_state[r], actions[r]]))
+            self.view.model.q_table[r, old_state[r], actions[r]] = (1.0 - alpha) * self.view.model.q_table[r, old_state[r], actions[r]] + alpha * (rewards[r] + gamma * np.max(self.view.model.q_table[r, next_state,:]) - self.view.model.q_table[r, old_state[r], actions[r]])
             print ("Q-val after", self.view.model.q_table[r, old_state[r], actions[r]])
         print ("Q TABLE ", self.view.model.q_table)
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))

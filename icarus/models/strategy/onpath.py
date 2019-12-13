@@ -135,7 +135,7 @@ class OnPathEdge(Strategy):
             for u, v in path_links(path):
                 print ("Link Delay", u, v, self.view.link_delay(u, v))
                 current_delay = current_delay + self.view.link_delay(u,v)
-                self.controller.forward_request_hop(u, v)
+                #self.controller.forward_request_hop(u, v)
                 #print ("Cache dump of ", v , "is: ", self.view.cache_dump(v))
             if current_delay < min_delay_path:
                 min_delay_path = current_delay

@@ -89,9 +89,12 @@ class NetworkView(object):
         for r in self.model.routers :
             contents = self.cache_dump(r)
             print ("R C", r, contents)
-            for c in contents :
-                self.model.state[self.model.routers.index(r), c-1] = 1.0
-                print ("val ", self.model.state[self.model.routers.index(r), c-1])
+            for f in range(len(self.model.library)):
+                if f+1 in contents :
+                    self.model.state[self.model.routers.index(r), f] = 1.0
+                    print ("val ", self.model.state[self.model.routers.index(r), f])
+                else :
+                    self.model.state[self.model.routers.index(r), f] = 0.0
         #add popularity
         self.calculate_popularity()
         print ("STATE ::: ", self.model.state)
@@ -177,7 +180,10 @@ class NetworkView(object):
                 if count <= self.model.cache[self.model.routers[x]].maxlen - 1 or count > self.model.cache[self.model.routers[x]].maxlen :
                     self.model.q_table[:,i] = -1e6
                     print ("Invalid actions : ", i, action)
-                    break 
+                    break
+                else :
+                    print ("Valid actions : ", i, action)
+        print ("Q Table : ", self.model.q_table)
 
     def get_action(self):
         print ("INSIDE GET ACTION")
@@ -199,7 +205,7 @@ class NetworkView(object):
             return
         old_state = self.encode_state(self.current_state)
         next_state = self.encode_state()
-        self.model.q_table[old_state, self.current_action] = (1.0 - alpha) * self.model.q_table[old_state, self.current_action] + alpha * ((rewards + gamma * np.max(self.model.q_table[next_state,:]) - self.model.q_table[old_state, self.current_action]))
+        self.model.q_table[old_state, self.current_action] = (1.0 - alpha) * self.model.q_table[old_state, self.current_action] + alpha * (rewards + gamma * np.max(self.model.q_table[next_state,:]) - self.model.q_table[old_state, self.current_action])
         print ("UPDATE Q TABLE END")
 
     def content_locations(self, k):
@@ -531,7 +537,7 @@ class NetworkModel(object):
         """
         dimension_1 = (2 ** (len(self.routers) * 2 * len(self.library)))
         dimension_2 = (2 ** (len(self.routers) * len(self.library)))
-        print ("DIms done")
+        print ("DIms done", dimension_1, dimension_2)
         try :
             #self.q_table = np.full((dimension_1, dimension_2), 0.0, dtype=float)
             self.q_table = np.full((dimension_1, dimension_2), 0.0, dtype=float)

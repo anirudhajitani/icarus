@@ -228,11 +228,16 @@ class DecRL(Strategy):
             #put contents in the cache
             for x in range(max_action_matrix.shape[0]):
                 if max_action_matrix[x] == 1:
+                    #here get_content called without content so cache hit/miss can be computed,
                     if self.controller.get_content(r, x+1) is False:
+                        self.controller.forward_request_path(r, self.view.content_source(x+1))
+                        self.controller.forward_content_path(self.view.content_source(x+1), r)
                         self.controller.put_content(r, x+1)
-                        rewards[self.view.model.routers.index(r)] -= 1
+                        path = self.view.shortest_path(r, self.view.content_source(x+1))
+                        for u, v in path_links(path):
+                            rewards[self.view.model.routers.index(r)] -= self.view.link_delay(u,v)
                 else:
-                    if self.controller.get_content(r, x+1) is True:
+                    if self.controller.get_content(r) is True:
                         self.controller.remove_content(r, x+1)
                         rewards[self.view.model.routers.index(r)] -= 1
             #self.view.model.popularity *= 0
@@ -277,6 +282,7 @@ class DecRL(Strategy):
         print ("Serving Node : ", serving_node)
         print ("Total Delay : ", min_delay_path)
         common_reward -= min_delay_path
+        #Cache is opoosite as we ave calculated it before, doing it here would be biased
         self.controller.get_content(serving_node)
         #get maximum of those actions
         #update q_table accordingly

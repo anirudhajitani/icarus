@@ -198,7 +198,7 @@ class DecRL(Strategy):
         old_state = []
         actions = []
         common_reward = 0.0
-        rewards = np.full((len(self.view.model.routers)), 0.0)
+        #rewards = np.full((len(self.view.model.routers)), 0.0)
         for r in self.view.model.routers :
             contents, state = self.view.get_state(r)
             state = self.view.encode_state(r)
@@ -235,11 +235,13 @@ class DecRL(Strategy):
                         self.controller.put_content(r, x+1)
                         path = self.view.shortest_path(r, self.view.content_source(x+1))
                         for u, v in path_links(path):
-                            rewards[self.view.model.routers.index(r)] -= self.view.link_delay(u,v)
+                            common_reward -= self.view.link_delay(u,v)
+                            #rewards[self.view.model.routers.index(r)] -= self.view.link_delay(u,v)
                 else:
                     if self.controller.get_content(r) is True:
                         self.controller.remove_content(r, x+1)
-                        rewards[self.view.model.routers.index(r)] -= 1
+                        common_reward -= 1
+                        #rewards[self.view.model.routers.index(r)] -= 1
             #self.view.model.popularity *= 0
         
         content_loc = self.view.content_locations(content)
@@ -286,15 +288,15 @@ class DecRL(Strategy):
         self.controller.get_content(serving_node)
         #get maximum of those actions
         #update q_table accordingly
-        rewards += common_reward
-        print ("REWARDS MATRIX", rewards)
+        #rewards += common_reward
+        #print ("REWARDS MATRIX", rewards)
         for r in range(len(self.view.model.routers)):
             #contents, state = self.view.get_state(self.view.model.routers[r])
             next_state = self.view.encode_state(self.view.model.routers[r])
             print ("Q-val before", self.view.model.q_table[r, old_state[r], actions[r]])
             print ((1.0 - alpha) * self.view.model.q_table[r, old_state[r], actions[r]])
-            print ((rewards[r] + gamma * np.max(self.view.model.q_table[r, next_state,:]) - self.view.model.q_table[r, old_state[r], actions[r]]))
-            self.view.model.q_table[r, old_state[r], actions[r]] = (1.0 - alpha) * self.view.model.q_table[r, old_state[r], actions[r]] + alpha * (rewards[r] + gamma * np.max(self.view.model.q_table[r, next_state,:]) - self.view.model.q_table[r, old_state[r], actions[r]])
+            print ((common_reward + gamma * np.max(self.view.model.q_table[r, next_state,:]) - self.view.model.q_table[r, old_state[r], actions[r]]))
+            self.view.model.q_table[r, old_state[r], actions[r]] = (1.0 - alpha) * self.view.model.q_table[r, old_state[r], actions[r]] + alpha * (common_reward + gamma * np.max(self.view.model.q_table[r, next_state,:]) - self.view.model.q_table[r, old_state[r], actions[r]])
             print ("Q-val after", self.view.model.q_table[r, old_state[r], actions[r]])
         print ("Q TABLE ", self.view.model.q_table)
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))

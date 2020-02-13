@@ -50,7 +50,7 @@ class Partition(Strategy):
         self.cache_assignment = self.view.topology().graph['cache_assignment']
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         source = self.view.content_source(content)
         self.controller.start_session(time, receiver, content, log)
         cache = self.cache_assignment[receiver]
@@ -58,9 +58,9 @@ class Partition(Strategy):
         if not self.controller.get_content(cache):
             self.controller.forward_request_path(cache, source)
             self.controller.get_content(source)
-            self.controller.forward_content_path(source, cache)
+            self.controller.forward_content_path(source, cache, size)
             self.controller.put_content(cache)
-        self.controller.forward_content_path(cache, receiver)
+        self.controller.forward_content_path(cache, receiver, size)
         self.controller.end_session()
 
 
@@ -83,7 +83,7 @@ class Edge(Strategy):
         super(Edge, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -109,7 +109,7 @@ class Edge(Strategy):
 
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
-        self.controller.forward_content_path(serving_node, receiver, path)
+        self.controller.forward_content_path(serving_node, receiver, size, path)
         if serving_node == source:
             self.controller.put_content(edge_cache)
         self.controller.end_session()
@@ -128,7 +128,7 @@ class LeaveCopyEverywhere(Strategy):
         super(LeaveCopyEverywhere, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -146,7 +146,7 @@ class LeaveCopyEverywhere(Strategy):
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
         for u, v in path_links(path):
-            self.controller.forward_content_hop(u, v)
+            self.controller.forward_content_hop(u, v, size)
             if self.view.has_cache(v):
                 # insert content
                 self.controller.put_content(v)
@@ -173,7 +173,7 @@ class LeaveCopyDown(Strategy):
         super(LeaveCopyDown, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -233,7 +233,7 @@ class ProbCache(Strategy):
         self.cache_size = view.cache_nodes(size=True)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -300,7 +300,7 @@ class CacheLessForMore(Strategy):
             self.betw = nx.betweenness_centrality(topology)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -350,7 +350,7 @@ class RandomBernoulli(Strategy):
         self.p = p
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -389,7 +389,7 @@ class RandomChoice(Strategy):
         super(RandomChoice, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)

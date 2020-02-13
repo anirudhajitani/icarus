@@ -19,6 +19,7 @@ all content identifiers. This is needed for content placement.
 """
 import random
 import csv
+import numpy as np
 
 import networkx as nx
 
@@ -93,6 +94,8 @@ class StationaryWorkload(object):
         self.zipf = TruncatedZipfDist(alpha, n_contents)
         self.n_contents = n_contents
         self.contents = range(1, n_contents + 1)
+        #Random length of contents
+        self.contents_len = np.random.randint(1,10,n_contents)
         self.alpha = alpha
         self.rate = rate
         self.n_warmup = n_warmup
@@ -114,8 +117,9 @@ class StationaryWorkload(object):
             else:
                 receiver = self.receivers[self.receiver_dist.rv() - 1]
             content = int(self.zipf.rv())
+            content_size = self.contents_len[content-1]
             log = (req_counter >= self.n_warmup)
-            event = {'receiver': receiver, 'content': content, 'log': log}
+            event = {'receiver': receiver, 'content': content, 'size': content_size, 'log': log}
             yield (t_event, event)
             req_counter += 1
         raise StopIteration()
@@ -257,9 +261,11 @@ class TraceDrivenWorkload(object):
         self.receivers = [v for v in topology.nodes()
                           if topology.node[v]['stack'][0] == 'receiver']
         self.contents = []
+        self.contents_len = dict()
         with open(contents_file, 'r', buffering=self.buffering) as f:
             for content in f:
                 self.contents.append(content)
+                self.contents_len[content] = random.randint(1,10)
         self.beta = beta
         if beta != 0:
             degree = nx.degree(topology)
@@ -279,7 +285,7 @@ class TraceDrivenWorkload(object):
                 else:
                     receiver = self.receivers[self.receiver_dist.rv() - 1]
                 log = (req_counter >= self.n_warmup)
-                event = {'receiver': receiver, 'content': content, 'log': log}
+                event = {'receiver': receiver, 'content': content, 'size': self.contents_len[content], 'log': log}
                 yield (t_event, event)
                 req_counter += 1
                 if(req_counter >= self.n_warmup + self.n_measured):

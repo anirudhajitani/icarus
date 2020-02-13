@@ -66,7 +66,7 @@ class BaseHashrouting(Strategy):
             return self.clusters[cluster][h % self.cluster_size[cluster]]
         return self.cache_assignment[h % self.n_cache_nodes]
 
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         raise NotImplementedError('Cannot use BaseHashrouting class as is. '
                                   'This class is meant to be extended by other classes.')
 
@@ -113,7 +113,7 @@ class Hashrouting(BaseHashrouting):
         self.routing = routing
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         cache = self.authoritative_cache(content)
@@ -123,36 +123,36 @@ class Hashrouting(BaseHashrouting):
         self.controller.forward_request_path(receiver, cache)
         if self.controller.get_content(cache):
             # We have a cache hit here
-            self.controller.forward_content_path(cache, receiver)
+            self.controller.forward_content_path(cache, receiver, size)
         else:
             # Cache miss: go all the way to source
             self.controller.forward_request_path(cache, source)
             if not self.controller.get_content(source):
                 raise RuntimeError('The content is not found the expected source')
             if self.routing == 'SYMM':
-                self.controller.forward_content_path(source, cache)
+                self.controller.forward_content_path(source, cache, size)
                 # Insert in cache
                 self.controller.put_content(cache)
                 # Forward to receiver
-                self.controller.forward_content_path(cache, receiver)
+                self.controller.forward_content_path(cache, receiver, size)
             elif self.routing == 'ASYMM':
                 if cache in self.view.shortest_path(source, receiver):
                     # Forward to cache
-                    self.controller.forward_content_path(source, cache)
+                    self.controller.forward_content_path(source, cache, size)
                     # Insert in cache
                     self.controller.put_content(cache)
                     # Forward to receiver
-                    self.controller.forward_content_path(cache, receiver)
+                    self.controller.forward_content_path(cache, receiver, size)
                 else:
                     # Forward to receiver straight away
-                    self.controller.forward_content_path(source, receiver)
+                    self.controller.forward_content_path(source, receiver, size)
             elif self.routing == 'MULTICAST':
                 if cache in self.view.shortest_path(source, receiver):
-                    self.controller.forward_content_path(source, cache)
+                    self.controller.forward_content_path(source, cache, size)
                     # Insert in cache
                     self.controller.put_content(cache)
                     # Forward to receiver
-                    self.controller.forward_content_path(cache, receiver)
+                    self.controller.forward_content_path(cache, receiver, size)
                 else:
                     # Multicast
                     cache_path = self.view.shortest_path(source, cache)
@@ -165,9 +165,9 @@ class Hashrouting(BaseHashrouting):
                             break
                     else:
                         fork_node = cache
-                    self.controller.forward_content_path(source, fork_node)
-                    self.controller.forward_content_path(fork_node, receiver)
-                    self.controller.forward_content_path(fork_node, cache,
+                    self.controller.forward_content_path(source, fork_node, size)
+                    self.controller.forward_content_path(fork_node, receiver, size)
+                    self.controller.forward_content_path(fork_node, cache, size,
                                                          main_path=False)
                 self.controller.put_content(cache)
             else:
@@ -220,7 +220,7 @@ class HashroutingEdge(BaseHashrouting):
             raise ValueError('There are receivers connected to a proxy without cache')
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         cache = self.authoritative_cache(content)
@@ -230,7 +230,7 @@ class HashroutingEdge(BaseHashrouting):
         self.controller.forward_request_hop(receiver, proxy)
         if proxy != cache:
             if self.controller.get_content_local_cache(proxy):
-                self.controller.forward_content_hop(proxy, receiver)
+                self.controller.forward_content_hop(proxy, receiver, size)
                 self.controller.end_session()
                 return
             else:
@@ -238,36 +238,36 @@ class HashroutingEdge(BaseHashrouting):
                 self.controller.forward_request_path(proxy, cache)
         if self.controller.get_content(cache):
             # We have a cache hit here
-            self.controller.forward_content_path(cache, proxy)
+            self.controller.forward_content_path(cache, proxy, size)
         else:
             # Cache miss: go all the way to source
             self.controller.forward_request_path(cache, source)
             if not self.controller.get_content(source):
                 raise RuntimeError('The content is not found the expected source')
             if self.routing == 'SYMM':
-                self.controller.forward_content_path(source, cache)
+                self.controller.forward_content_path(source, cache, size)
                 # Insert in cache
                 self.controller.put_content(cache)
                 # Forward to receiver
-                self.controller.forward_content_path(cache, proxy)
+                self.controller.forward_content_path(cache, proxy, size)
             elif self.routing == 'ASYMM':
                 if cache in self.view.shortest_path(source, proxy):
                     # Forward to cache
-                    self.controller.forward_content_path(source, cache)
+                    self.controller.forward_content_path(source, cache, size)
                     # Insert in cache
                     self.controller.put_content(cache)
                     # Forward to receiver
-                    self.controller.forward_content_path(cache, proxy)
+                    self.controller.forward_content_path(cache, proxy, size)
                 else:
                     # Forward to receiver straight away
-                    self.controller.forward_content_path(source, proxy)
+                    self.controller.forward_content_path(source, proxy, size)
             elif self.routing == 'MULTICAST':
                 if cache in self.view.shortest_path(source, proxy):
-                    self.controller.forward_content_path(source, cache)
+                    self.controller.forward_content_path(source, cache, size)
                     # Insert in cache
                     self.controller.put_content(cache)
                     # Forward to receiver
-                    self.controller.forward_content_path(cache, receiver)
+                    self.controller.forward_content_path(cache, receiver, size)
                 else:
                     # Multicast
                     cache_path = self.view.shortest_path(source, cache)
@@ -279,16 +279,16 @@ class HashroutingEdge(BaseHashrouting):
                             fork_node = cache_path[i - 1]
                             break
                     else: fork_node = cache
-                    self.controller.forward_content_path(source, fork_node)
-                    self.controller.forward_content_path(fork_node, proxy)
-                    self.controller.forward_content_path(fork_node, cache, main_path=False)
+                    self.controller.forward_content_path(source, fork_node, size)
+                    self.controller.forward_content_path(fork_node, proxy, size)
+                    self.controller.forward_content_path(fork_node, cache, size, main_path=False)
                 self.controller.put_content(cache)
             else:
                 raise ValueError("Routing %s not recognized" % self.routing)
 
         if proxy != cache:
             self.controller.put_content_local_cache(proxy)
-        self.controller.forward_content_hop(proxy, receiver)
+        self.controller.forward_content_hop(proxy, receiver, size)
         self.controller.end_session()
 
 
@@ -329,7 +329,7 @@ class HashroutingOnPath(BaseHashrouting):
         self.controller.reserve_local_cache(on_path_cache_ratio)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         cache = self.authoritative_cache(content)
@@ -370,7 +370,7 @@ class HashroutingOnPath(BaseHashrouting):
             # Here I just need to return the content directly to the user
             path = list(reversed(self.view.shortest_path(receiver, serving_node)))
             for u, v in path_links(path):
-                self.controller.forward_content_hop(u, v)
+                self.controller.forward_content_hop(u, v, size)
                 if v != receiver:
                     self.controller.put_content_local_cache(v)
             self.controller.end_session()
@@ -380,7 +380,7 @@ class HashroutingOnPath(BaseHashrouting):
             links = path_links(list(reversed(self.view.shortest_path(cache, serving_node)))) + \
                    path_links(list(reversed(self.view.shortest_path(receiver, cache))))
             for u, v in links:
-                self.controller.forward_content_hop(u, v)
+                self.controller.forward_content_hop(u, v, size)
                 if v == cache:
                     self.controller.put_content(v)
                 else:
@@ -388,7 +388,7 @@ class HashroutingOnPath(BaseHashrouting):
         elif self.routing == 'ASYMM':
             path = list(reversed(self.view.shortest_path(receiver, serving_node)))
             for u, v in path_links(path):
-                self.controller.forward_content_hop(u, v)
+                self.controller.forward_content_hop(u, v, size)
                 if v == cache:
                     self.controller.put_content(v)
                 else:
@@ -399,13 +399,13 @@ class HashroutingOnPath(BaseHashrouting):
                                         serving_node, [receiver, cache])
             cache_branch = mcast_tree.difference(main_path)
             for u, v in cache_branch:
-                self.controller.forward_content_hop(u, v, main_path=False)
+                self.controller.forward_content_hop(u, v, size, main_path=False)
                 if v == cache:
                     self.controller.put_content(v)
                 else:
                     self.controller.put_content_local_cache(v)
             for u, v in main_path:
-                self.controller.forward_content_hop(u, v, main_path=True)
+                self.controller.forward_content_hop(u, v, size, main_path=True)
                 if v == cache:
                     self.controller.put_content(v)
                 else:
@@ -455,7 +455,7 @@ class HashroutingClustered(BaseHashrouting):
         self.cluster_sp = dict(nx.all_pairs_shortest_path(self.cluster_topology))
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         # handle (and log if required) actual request
@@ -484,7 +484,7 @@ class HashroutingClustered(BaseHashrouting):
             cache = self.authoritative_cache(content, receiver_cluster)
             self.controller.forward_request_path(receiver, cache)
             if self.controller.get_content(cache):
-                self.controller.forward_content_path(cache, receiver)
+                self.controller.forward_content_path(cache, receiver, size)
                 self.controller.end_session()
                 return
             else:
@@ -500,12 +500,12 @@ class HashroutingClustered(BaseHashrouting):
                 for cluster in cluster_path:
                     cache = self.authoritative_cache(content, cluster)
                     # Forward request to authoritative cache
-                    self.controller.forward_content_path(start, cache)
+                    self.controller.forward_content_path(start, cache, size)
                     self.controller.put_content(cache)
                     start = cache
-                self.controller.forward_content_path(start, receiver)
+                self.controller.forward_content_path(start, receiver, size)
             elif self.intra_routing == 'ASYMM':
-                self.controller.forward_content_path(start, receiver)
+                self.controller.forward_content_path(start, receiver, size)
                 path = self.view.shortest_path(start, receiver)
                 traversed_clusters = set(self.view.cluster(v) for v in path)
                 authoritative_caches = set(self.authoritative_cache(content, cluster)
@@ -522,16 +522,16 @@ class HashroutingClustered(BaseHashrouting):
                 mcast_tree = multicast_tree(self.view.all_pairs_shortest_paths(), start, destinations)
                 mcast_tree = mcast_tree.difference(main_path)
                 for u, v in mcast_tree:
-                    self.controller.forward_content_hop(u, v, main_path=False)
+                    self.controller.forward_content_hop(u, v, size, main_path=False)
                 for u, v in main_path:
-                    self.controller.forward_content_hop(u, v, main_path=True)
+                    self.controller.forward_content_hop(u, v, size, main_path=True)
             else:
                 raise ValueError("Intra-cluster routing %s not supported" % self.intra_routing)
         elif self.inter_routing == 'EDGE':
             if self.intra_routing == 'SYMM':
                 cache = self.authoritative_cache(content, cluster_path[-1])
-                self.controller.forward_content_path(start, cache)
-                self.controller.forward_content_path(cache, receiver)
+                self.controller.forward_content_path(start, cache, size)
+                self.controller.forward_content_path(cache, receiver, size)
                 path = self.view.shortest_path(start, receiver)
                 traversed_clusters = set(self.view.cluster(v) for v in path)
                 authoritative_caches = set(self.authoritative_cache(content, cluster)
@@ -542,7 +542,7 @@ class HashroutingClustered(BaseHashrouting):
                 if cache not in traversed_caches:
                     self.controller.put_content(cache)
             elif self.intra_routing == 'ASYMM':
-                self.controller.forward_content_path(start, receiver)
+                self.controller.forward_content_path(start, receiver, size)
                 path = self.view.shortest_path(start, receiver)
                 traversed_clusters = set(self.view.cluster(v) for v in path)
                 authoritative_caches = set(self.authoritative_cache(content, cluster)
@@ -557,9 +557,9 @@ class HashroutingClustered(BaseHashrouting):
                 mcast_tree = multicast_tree(self.view.all_pairs_shortest_paths(), start, [cache])
                 mcast_tree = mcast_tree.difference(main_path)
                 for u, v in mcast_tree:
-                    self.controller.forward_content_hop(u, v, main_path=False)
+                    self.controller.forward_content_hop(u, v, size, main_path=False)
                 for u, v in main_path:
-                    self.controller.forward_content_hop(u, v, main_path=True)
+                    self.controller.forward_content_hop(u, v, size, main_path=True)
         else:
             raise ValueError("Inter-cluster routing %s not supported" % self.inter_routing)
         self.controller.end_session()
@@ -679,7 +679,7 @@ class HashroutingHybridAM(BaseHashrouting):
         self.max_stretch = nx.diameter(view.topology()) * max_stretch
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         cache = self.authoritative_cache(content)
@@ -689,7 +689,7 @@ class HashroutingHybridAM(BaseHashrouting):
         self.controller.forward_request_path(receiver, cache)
         if self.controller.get_content(cache):
             # We have a cache hit here
-            self.controller.forward_content_path(cache, receiver)
+            self.controller.forward_content_path(cache, receiver, size)
         else:
             # Cache miss: go all the way to source
             self.controller.forward_request_path(cache, source)
@@ -698,11 +698,11 @@ class HashroutingHybridAM(BaseHashrouting):
 
             if cache in self.view.shortest_path(source, receiver):
                 # Forward to cache
-                self.controller.forward_content_path(source, cache)
+                self.controller.forward_content_path(source, cache, size)
                 # Insert in cache
                 self.controller.put_content(cache)
                 # Forward to receiver
-                self.controller.forward_content_path(cache, receiver)
+                self.controller.forward_content_path(cache, receiver, size)
             else:
                 # Multicast
                 cache_path = self.view.shortest_path(source, cache)
@@ -715,10 +715,10 @@ class HashroutingHybridAM(BaseHashrouting):
                         break
                 else:
                     fork_node = cache
-                self.controller.forward_content_path(source, receiver, main_path=True)
+                self.controller.forward_content_path(source, receiver, size, main_path=True)
                 # multicast to cache only if stretch is under threshold
                 if len(self.view.shortest_path(fork_node, cache)) - 1 < self.max_stretch:
-                    self.controller.forward_content_path(fork_node, cache, main_path=False)
+                    self.controller.forward_content_path(fork_node, cache, size, main_path=False)
                     self.controller.put_content(cache)
         self.controller.end_session()
 
@@ -746,7 +746,7 @@ class HashroutingHybridSM(BaseHashrouting):
         super(HashroutingHybridSM, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         cache = self.authoritative_cache(content)
@@ -756,7 +756,7 @@ class HashroutingHybridSM(BaseHashrouting):
         self.controller.forward_request_path(receiver, cache)
         if self.controller.get_content(cache):
             # We have a cache hit here
-            self.controller.forward_content_path(cache, receiver)
+            self.controller.forward_content_path(cache, receiver, size)
         else:
             # Cache miss: go all the way to source
             self.controller.forward_request_path(cache, source)
@@ -764,11 +764,11 @@ class HashroutingHybridSM(BaseHashrouting):
                 raise RuntimeError('The content is not found the expected source')
 
             if cache in self.view.shortest_path(source, receiver):
-                self.controller.forward_content_path(source, cache)
+                self.controller.forward_content_path(source, cache, size)
                 # Insert in cache
                 self.controller.put_content(cache)
                 # Forward to receiver
-                self.controller.forward_content_path(cache, receiver)
+                self.controller.forward_content_path(cache, receiver, size)
             else:
                 # Multicast
                 cache_path = self.view.shortest_path(source, cache)
@@ -793,10 +793,10 @@ class HashroutingHybridSM(BaseHashrouting):
                 # because of easier packet processing
                 if symmetric_path_len <= multicast_path_len:  # use symmetric delivery
                     # Symmetric delivery
-                    self.controller.forward_content_path(source, cache, main_path=True)
-                    self.controller.forward_content_path(cache, receiver, main_path=True)
+                    self.controller.forward_content_path(source, cache, size, main_path=True)
+                    self.controller.forward_content_path(cache, receiver, size, main_path=True)
                 else:
                     # Multicast delivery
-                    self.controller.forward_content_path(source, receiver, main_path=True)
-                    self.controller.forward_content_path(fork_node, cache, main_path=False)
+                    self.controller.forward_content_path(source, receiver, size, main_path=True)
+                    self.controller.forward_content_path(fork_node, cache, size, main_path=False)
                 self.controller.end_session()

@@ -58,7 +58,7 @@ class NearestReplicaRouting(Strategy):
                                                                weight='delay'))
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         locations = self.view.content_locations(content)
         nearest_replica = min(locations, key=lambda x: self.distance[receiver][x])
@@ -85,13 +85,13 @@ class NearestReplicaRouting(Strategy):
         path = list(reversed(self.view.shortest_path(receiver, nearest_replica)))
         if self.metacaching == 'LCE':
             for u, v in path_links(path):
-                self.controller.forward_content_hop(u, v)
+                self.controller.forward_content_hop(u, v, size)
                 if self.view.has_cache(v) and not self.view.cache_lookup(v, content):
                     self.controller.put_content(v)
         elif self.metacaching == 'LCD':
             copied = False
             for u, v in path_links(path):
-                self.controller.forward_content_hop(u, v)
+                self.controller.forward_content_hop(u, v, size)
                 if not copied and v != receiver and self.view.has_cache(v):
                     self.controller.put_content(v)
                     copied = True

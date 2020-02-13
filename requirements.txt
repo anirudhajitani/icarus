@@ -7,3 +7,9 @@ tox
 # Documentation
 numpydoc
 sphinx
+torch
+numpy
+networkx
+scipy
+collections
+itertools

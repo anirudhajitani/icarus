@@ -3,6 +3,7 @@ from __future__ import division
 import random
 
 import networkx as nx
+import sys
 
 from icarus.registry import register_strategy
 from icarus.util import inheritdoc, path_links
@@ -12,6 +13,7 @@ from .base import Strategy
 __all__ = [
        'Partition',
        'Edge',
+       'RlDec',
        'LeaveCopyEverywhere',
        'LeaveCopyDown',
        'ProbCache',
@@ -114,7 +116,147 @@ class Edge(Strategy):
             self.controller.put_content(edge_cache)
         self.controller.end_session()
 
+@register_strategy('RL_DEC')
+class RlDec(Strategy):
+    """Reinforcement Learning Decentralized caching strategy.
 
+    In this strategy, we aim to find an optimal policy where the caches
+    look at the current state of the network and try decide if it needs
+    to cache certain files or not
+    """
+
+    @inheritdoc(Strategy)
+    def __init__(self, view, controller):
+        super(RlDec, self).__init__(view, controller)
+
+    def env_step(self):
+        """
+
+        A step of the environment includes the following for all agents:
+        1. get the current state of each agent
+        2. select actions
+        3. perform the actions
+        """
+        print ("ENV STEP")
+        for a in self.view.agents:
+            curr_state = a.get_state()
+            action = a.select_actions(curr_state)
+            action = a.decode_action(action)
+            a.rewards -= self.perform_action(action, a.cache)
+
+    def update_gradients(self):
+        """
+
+        Get the rewards from the environment
+        Append the rewards to the rewards data structure accessed by the policy class
+        Perform actor-critic update
+        """
+        #print ("UPGARDE GRADIENTS")
+        for a in self.view.agents:
+            a.update()
+
+
+    def perform_action(self,action, cache):
+        """
+        Decode the actions provided by the policy network
+        Cache files according to the action selected
+
+        #TODO - One of the scenarios that can happen that can add delay:
+        Files needs to be cached but removed based on LRU, so one file can
+        be deleted and then fetched again in the same iteration.
+        SO we create a list of files to be fetched and list of files
+        to be deleted, first delete the files and then get the rest to cache.
+        """
+        add_contents = []
+        remove_contents = []
+        existing_contents = self.view.cache_dump(cache)
+        for a in range(action.size):
+            if action[a] == 1:
+                #here get_content called without content so cache hit/miss can be computed,
+                if self.controller.get_content(cache, a+1) is False:
+                    add_contents.append(a+1)
+            else:
+                if a+1 in existing_contents:
+                    remove_contents.append(a+1)
+
+        #print ("To be added ", add_contents)
+        #print ("To be removed ", remove_contents)
+    
+        min_delay = sys.maxsize
+        for rc in remove_contents:
+            self.controller.remove_content(cache, rc)
+        for ac in add_contents:
+            # Get location of all nodes that has the content stored
+            content_loc = self.view.content_locations(ac)
+            # Finding the path with the minimum delay in the network
+            for c in content_loc :
+                delay = self.view.shortest_path_len(cache, c)
+                if delay < min_delay:
+                    min_delay = delay
+                    serving_node = c
+
+            # fetching the data
+            min_path = self.view.shortest_path(cache, serving_node)
+            for u, v in path_links(min_path):
+                self.controller.forward_request_hop(u, v)
+
+            # update the rewards for the episode
+            #print ("DELAY IN FETCHING", min_delay)
+            path = list(reversed(self.view.shortest_path(cache, serving_node)))
+            self.controller.forward_content_path(serving_node, cache, path)
+            self.controller.put_content(cache, ac)
+        print ("CACHE DUMP ", cache, " = ", self.view.cache_dump(cache))
+        return min_delay
+
+    @inheritdoc(Strategy)
+    def process_event(self, time, receiver, content, log):
+        # get all required data
+        print ("PROCESS EVENT", time, receiver, content)
+        source = self.view.content_source(content)
+        path = self.view.shortest_path(receiver, source)
+        
+        # Route requests to original source and queries caches on the path
+        self.controller.start_session(time, receiver, content, log)
+        self.view.count += 1
+        print ("View Count : ", self.view.count)
+        if self.view.count % 50 == 0:
+            self.env_step() 
+        # Get location of all nodes that has the content stored
+        content_loc = self.view.content_locations(content)
+        min_delay = sys.maxsize
+        #print ("Min Delay ", min_delay) 
+        # Finding the path with the minimum delay in the network
+        for c in content_loc :
+            delay = self.view.shortest_path_len(receiver, c)
+            #print ("Delay : ", receiver, " , ", c, " : ", delay) 
+            if delay < min_delay:
+                min_delay = delay
+                serving_node = c
+
+        # fetching the data 
+        min_path = self.view.shortest_path(receiver, serving_node)
+        for u, v in path_links(min_path):
+            self.controller.forward_request_hop(u, v)
+            self.controller.get_content(v)
+
+        # update the rewards for the episode
+        self.view.common_rewards -= min_delay
+        if self.view.count % 50 == 0:
+            for a in self.view.agents:
+                a.rewards -= self.view.common_rewards
+                a.policy.rewards.append(a.rewards)
+                a.rewards = 0
+            self.view.common_rewards = 0
+            #print ("AGENT ", a , " REWARDS ", a.policy.rewards.append)
+        if self.view.count % 500 == 0:
+            self.update_gradients()
+        # Return content
+        #print ("Serving Node", serving_node)
+        path = list(reversed(self.view.shortest_path(receiver, serving_node)))
+        self.controller.forward_content_path(serving_node, receiver, path)
+        self.controller.end_session()
+        print ("Session End")
+        
 @register_strategy('LCE')
 class LeaveCopyEverywhere(Strategy):
     """Leave Copy Everywhere (LCE) strategy.

@@ -32,7 +32,7 @@ RESULTS_FORMAT = 'PICKLE'
 
 # List of metrics to be measured in the experiments
 # The implementation of data collectors are located in ./icarus/execution/collectors.py
-DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY']
+DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD']
 
 # Queue of experiments
 EXPERIMENT_QUEUE = deque()

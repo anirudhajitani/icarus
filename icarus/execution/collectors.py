@@ -111,7 +111,7 @@ class DataCollector(object):
         """
         pass
 
-    def content_hop(self, u, v, main_path=True):
+    def content_hop(self, u, v, size, main_path=True):
         """Reports that a content has traversed the link *(u, v)*
 
         Parameters
@@ -207,9 +207,9 @@ class CollectorProxy(DataCollector):
             c.request_hop(u, v, main_path)
 
     @inheritdoc(DataCollector)
-    def content_hop(self, u, v, main_path=True):
+    def content_hop(self, u, v, size, main_path=True):
         for c in self.collectors['content_hop']:
-            c.content_hop(u, v, main_path)
+            c.content_hop(u, v, size, main_path)
 
     @inheritdoc(DataCollector)
     def end_session(self, success=True):
@@ -259,8 +259,9 @@ class LinkLoadCollector(DataCollector):
         self.req_count[(u, v)] += 1
 
     @inheritdoc(DataCollector)
-    def content_hop(self, u, v, main_path=True):
-        self.cont_count[(u, v)] += 1
+    def content_hop(self, u, v, size, main_path=True):
+        #size here instead of count to reflect the actual size used
+        self.cont_count[(u, v)] += size
 
     @inheritdoc(DataCollector)
     def results(self):
@@ -320,9 +321,10 @@ class LatencyCollector(DataCollector):
             self.sess_latency += self.view.link_delay(u, v)
 
     @inheritdoc(DataCollector)
-    def content_hop(self, u, v, main_path=True):
+    def content_hop(self, u, v, size, main_path=True):
         if main_path:
-            self.sess_latency += self.view.link_delay(u, v)
+            #Multiply by size of file 
+            self.sess_latency += (size * self.view.link_delay(u, v))
 
     @inheritdoc(DataCollector)
     def end_session(self, success=True):
@@ -477,7 +479,7 @@ class PathStretchCollector(DataCollector):
         self.req_path_len += 1
 
     @inheritdoc(DataCollector)
-    def content_hop(self, u, v, main_path=True):
+    def content_hop(self, u, v, size, main_path=True):
         self.cont_path_len += 1
 
     @inheritdoc(DataCollector)
@@ -548,7 +550,7 @@ class DummyCollector(DataCollector):
         self.session['request_hops'].append((u, v))
 
     @inheritdoc(DataCollector)
-    def content_hop(self, u, v, main_path=True):
+    def content_hop(self, u, v, size, main_path=True):
         self.session['content_hops'].append((u, v))
 
     @inheritdoc(DataCollector)

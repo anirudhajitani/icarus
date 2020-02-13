@@ -43,7 +43,7 @@ def exec_experiment(topology, workload, netconf, strategy, cache_policy, collect
     results : Tree
         A tree with the aggregated simulation results from all collectors
     """
-    model = NetworkModel(topology, cache_policy, **netconf)
+    model = NetworkModel(topology, workload, cache_policy, **netconf)
     view = NetworkView(model)
     controller = NetworkController(model)
 
@@ -55,9 +55,7 @@ def exec_experiment(topology, workload, netconf, strategy, cache_policy, collect
     strategy_name = strategy['name']
     strategy_args = {k: v for k, v in strategy.items() if k != 'name'}
     strategy_inst = STRATEGY[strategy_name](view, controller, **strategy_args)
-
     for time, event in workload:
-        #print ("Workload ", time, event)
         strategy_inst.process_event(time, **event)
-    print (collector.results())
+    print (collector.results()) 
     return collector.results()

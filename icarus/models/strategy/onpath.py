@@ -52,7 +52,7 @@ class Partition(Strategy):
         self.cache_assignment = self.view.topology().graph['cache_assignment']
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         source = self.view.content_source(content)
         self.controller.start_session(time, receiver, content, log)
         cache = self.cache_assignment[receiver]
@@ -60,9 +60,9 @@ class Partition(Strategy):
         if not self.controller.get_content(cache):
             self.controller.forward_request_path(cache, source)
             self.controller.get_content(source)
-            self.controller.forward_content_path(source, cache)
+            self.controller.forward_content_path(source, cache, size)
             self.controller.put_content(cache)
-        self.controller.forward_content_path(cache, receiver)
+        self.controller.forward_content_path(cache, receiver, size)
         self.controller.end_session()
 
 
@@ -85,7 +85,7 @@ class Edge(Strategy):
         super(Edge, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -111,7 +111,7 @@ class Edge(Strategy):
 
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
-        self.controller.forward_content_path(serving_node, receiver, path)
+        self.controller.forward_content_path(serving_node, receiver, size, path)
         if serving_node == source:
             self.controller.put_content(edge_cache)
         self.controller.end_session()
@@ -129,7 +129,7 @@ class RlDec(Strategy):
     def __init__(self, view, controller):
         super(RlDec, self).__init__(view, controller)
 
-    def env_step(self):
+    def env_step(self, size):
         """
 
         A step of the environment includes the following for all agents:
@@ -142,7 +142,7 @@ class RlDec(Strategy):
             curr_state = a.get_state()
             action = a.select_actions(curr_state)
             action = a.decode_action(action)
-            a.rewards -= self.perform_action(action, a.cache)
+            a.rewards -= self.perform_action(action, a.cache, size)
 
     def update_gradients(self):
         """
@@ -156,7 +156,7 @@ class RlDec(Strategy):
             a.update()
 
 
-    def perform_action(self,action, cache):
+    def perform_action(self,action, cache, size):
         """
         Decode the actions provided by the policy network
         Cache files according to the action selected
@@ -203,13 +203,13 @@ class RlDec(Strategy):
             # update the rewards for the episode
             #print ("DELAY IN FETCHING", min_delay)
             path = list(reversed(self.view.shortest_path(cache, serving_node)))
-            self.controller.forward_content_path(serving_node, cache, path)
+            self.controller.forward_content_path(serving_node, cache, size, path)
             self.controller.put_content(cache, ac)
         print ("CACHE DUMP ", cache, " = ", self.view.cache_dump(cache))
         return min_delay
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         print ("PROCESS EVENT", time, receiver, content)
         source = self.view.content_source(content)
@@ -220,7 +220,7 @@ class RlDec(Strategy):
         self.view.count += 1
         print ("View Count : ", self.view.count)
         if self.view.count % 50 == 0:
-            self.env_step() 
+            self.env_step(size) 
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
         min_delay = sys.maxsize
@@ -253,7 +253,7 @@ class RlDec(Strategy):
         # Return content
         #print ("Serving Node", serving_node)
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
-        self.controller.forward_content_path(serving_node, receiver, path)
+        self.controller.forward_content_path(serving_node, receiver, size, path)
         self.controller.end_session()
         #print ("Session End")
         
@@ -270,7 +270,7 @@ class LeaveCopyEverywhere(Strategy):
         super(LeaveCopyEverywhere, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -288,7 +288,7 @@ class LeaveCopyEverywhere(Strategy):
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
         for u, v in path_links(path):
-            self.controller.forward_content_hop(u, v)
+            self.controller.forward_content_hop(u, v, size)
             if self.view.has_cache(v):
                 # insert content
                 self.controller.put_content(v)
@@ -315,7 +315,7 @@ class LeaveCopyDown(Strategy):
         super(LeaveCopyDown, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -337,7 +337,7 @@ class LeaveCopyDown(Strategy):
         # caching node
         copied = False
         for u, v in path_links(path):
-            self.controller.forward_content_hop(u, v)
+            self.controller.forward_content_hop(u, v, size)
             if not copied and v != receiver and self.view.has_cache(v):
                 self.controller.put_content(v)
                 copied = True
@@ -375,7 +375,7 @@ class ProbCache(Strategy):
         self.cache_size = view.cache_nodes(size=True)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -404,7 +404,7 @@ class ProbCache(Strategy):
                      if n in self.cache_size])
             if v in self.cache_size:
                 x += 1
-            self.controller.forward_content_hop(u, v)
+            self.controller.forward_content_hop(u, v, size)
             if v != receiver and v in self.cache_size:
                 # The (x/c) factor raised to the power of "c" according to the
                 # extended version of ProbCache published in IEEE TPDS
@@ -442,7 +442,7 @@ class CacheLessForMore(Strategy):
             self.betw = nx.betweenness_centrality(topology)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -472,7 +472,7 @@ class CacheLessForMore(Strategy):
                     designated_cache = v
         # Forward content
         for u, v in path_links(path):
-            self.controller.forward_content_hop(u, v)
+            self.controller.forward_content_hop(u, v, size)
             if v == designated_cache:
                 self.controller.put_content(v)
         self.controller.end_session()
@@ -492,7 +492,7 @@ class RandomBernoulli(Strategy):
         self.p = p
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -511,7 +511,7 @@ class RandomBernoulli(Strategy):
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
         for u, v in path_links(path):
-            self.controller.forward_content_hop(u, v)
+            self.controller.forward_content_hop(u, v, size)
             if v != receiver and self.view.has_cache(v):
                 if random.random() < self.p:
                     self.controller.put_content(v)
@@ -531,7 +531,7 @@ class RandomChoice(Strategy):
         super(RandomChoice, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, log):
+    def process_event(self, time, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
@@ -552,7 +552,7 @@ class RandomChoice(Strategy):
         caches = [v for v in path[1:-1] if self.view.has_cache(v)]
         designated_cache = random.choice(caches) if len(caches) > 0 else None
         for u, v in path_links(path):
-            self.controller.forward_content_hop(u, v)
+            self.controller.forward_content_hop(u, v, size)
             if v == designated_cache:
                 self.controller.put_content(v)
         self.controller.end_session()

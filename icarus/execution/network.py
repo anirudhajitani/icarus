@@ -673,7 +673,7 @@ class NetworkModel(object):
     calls to the network controller.
     """
 
-    def __init__(self, topology, cache_policy, shortest_path=None, shortest_path_len=None):
+    def __init__(self, topology, workload, cache_policy, shortest_path=None, shortest_path_len=None):
         """Constructor
 
         Parameters
@@ -702,7 +702,7 @@ class NetworkModel(object):
                                 else symmetrify_paths_len(dict(nx.all_pairs_dijkstra_path_length(topology)))
         # Network topology
         self.topology = topology
-
+        self.workload = workload
         # Dictionary mapping each content object to its source
         # dict of location of contents keyed by content ID
         self.content_source = {}
@@ -846,7 +846,7 @@ class NetworkController(object):
         for u, v in path_links(path):
             self.forward_request_hop(u, v, main_path)
 
-    def forward_content_path(self, u, v, path=None, main_path=True):
+    def forward_content_path(self, u, v, size, path=None, main_path=True):
         """Forward a content from node *s* to node *t* over the provided path.
 
         Parameters
@@ -855,6 +855,7 @@ class NetworkController(object):
             Origin node
         t : any hashable type
             Destination node
+        size : length of the file
         path : list, optional
             The path to use. If not provided, shortest path is used
         main_path : bool, optional
@@ -866,7 +867,7 @@ class NetworkController(object):
         if path is None:
             path = self.model.shortest_path[u][v]
         for u, v in path_links(path):
-            self.forward_content_hop(u, v, main_path)
+            self.forward_content_hop(u, v, size, main_path)
 
     def forward_request_hop(self, u, v, main_path=True):
         """Forward a request over link  u -> v.
@@ -885,7 +886,7 @@ class NetworkController(object):
         if self.collector is not None and self.session['log']:
             self.collector.request_hop(u, v, main_path)
 
-    def forward_content_hop(self, u, v, main_path=True):
+    def forward_content_hop(self, u, v, size, main_path=True):
         """Forward a content over link  u -> v.
 
         Parameters
@@ -894,6 +895,7 @@ class NetworkController(object):
             Origin node
         v : any hashable type
             Destination node
+        size : length of the file
         main_path : bool, optional
             If *True*, indicates that this link is being traversed by content
             that will be delivered to the receiver. This is needed to
@@ -901,7 +903,7 @@ class NetworkController(object):
             *True*
         """
         if self.collector is not None and self.session['log']:
-            self.collector.content_hop(u, v, main_path)
+            self.collector.content_hop(u, v, size, main_path)
 
     def put_content(self, node, content=None):
         """Store content in the specified node.

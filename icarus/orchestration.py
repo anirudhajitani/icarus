@@ -234,8 +234,9 @@ def run_scenario(settings, params, curr_exp, n_exp):
             network_cache = cachepl_spec.pop('network_cache')
             print ("NETWORK CACHE : ", network_cache)
             # Cache budget is the cumulative number of cache entries across
-            # the whole network
-            cachepl_spec['cache_budget'] = workload.n_contents * network_cache
+            # the whole network (multiply by 5 as its average between 1 to 10 for different 
+            # size contents
+            cachepl_spec['cache_budget'] = workload.n_contents * 5 * network_cache
             print ("CACHE BUDGET : ", cachepl_spec)
             CACHE_PLACEMENT[cachepl_name](topology, **cachepl_spec)
 

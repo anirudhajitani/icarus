@@ -163,10 +163,28 @@ class Agent(object):
         self.view = view
         self.cache = router
         #If all cache are equal size, can be moved to model
-        self.action_choice = list(combinations(self.view.lib, self.view.model.cache_size[self.cache])) 
+        self.action_choice = []
+        self.valid_action = []
+        #All possible combinations of files (assuming minimum size of file is 1)
+        print ("Cache size : ", self.view.model.cache_size[self.cache])
+        for i in range(1, self.view.model.cache_size[self.cache] + 1):
+            self.action_choice.extend(list(combinations(self.view.lib, i))) 
         #print ("Action choices : ", self.action_choice)
+        #Filter out choice which don't add up to cache size
+        for value in self.action_choice:
+            val = list(value)
+            sum_list = 0
+            for v in val:
+                sum_list += self.view.model.workload.contents_len[v]
+            #print ("Val : ", val, " Sum : ", sum_list)
+            if sum_list <= self.view.model.cache_size[self.cache]:
+                self.valid_action.append(value)
+        print ("Content Lens : " ,self.view.model.workload.contents_len)
+        print ("Action choices after : ", self.valid_action)
+        del self.action_choice
         self.gamma = 0.9
         self.rewards = 0
+        
         """
         if Version == 0
         The state comprises of all the elements currently cached in the router.
@@ -185,7 +203,7 @@ class Agent(object):
             self.state = np.full((self.view.model.cache_size[self.cache]), 0, dtype=int)
          
         # Initialize the policy and other neural network optimizers
-        self.policy = Policy(len(self.view.model.library), len(self.action_choice))
+        self.policy = Policy(len(self.view.model.library), len(self.valid_action))
         #print ("POLICY", self.policy)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=3e-2)
         #print ("OPTIMIZER", self.optimizer)
@@ -212,7 +230,7 @@ class Agent(object):
         Decode the action and return a vector of binary values signifying which caches
         should cache what content
         """
-        files_to_cache = self.action_choice[action]
+        files_to_cache = self.valid_action[action]
         files_to_cache = list(files_to_cache)
         #print ("Files to cache", files_to_cache)
         action_decoded = np.full((len(self.view.model.library)), 0, dtype=int)

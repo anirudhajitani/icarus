@@ -185,7 +185,7 @@ def topology_path(n, delay=1, **kwargs):
     for v in routers:
         fnss.add_stack(topology, v, 'router')
     # set weights and delays on all links
-    fnss.set_weights_constant(topology, 1.0)
+    fnss.set_weights_constant(topology, 3.0)
     fnss.set_delays_constant(topology, delay, 'ms')
     # label links as internal or external
     for u, v in topology.edges():

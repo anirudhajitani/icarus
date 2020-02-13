@@ -104,14 +104,14 @@ class Policy(nn.Module):
     implements both Actor and Critic in one model
     """
 
-    def __init__(self, l):
+    def __init__(self, s_len, a_len):
         super(Policy, self).__init__()
         #print ("INIT")
         #TODO - change the layers based on the total number actions and values we want
-        self.affine1 = nn.Linear(l, 128)
+        self.affine1 = nn.Linear(s_len, 128)
 
         # actor's layer
-        self.action_head = nn.Linear(128, 2)
+        self.action_head = nn.Linear(128, a_len)
 
         # critic's layer
         self.value_head = nn.Linear(128, 1)
@@ -162,6 +162,9 @@ class Agent(object):
                              'NetworkView')
         self.view = view
         self.cache = router
+        #If all cache are equal size, can be moved to model
+        self.action_choice = list(combinations(self.view.lib, self.view.model.cache_size[self.cache])) 
+        #print ("Action choices : ", self.action_choice)
         self.gamma = 0.9
         self.rewards = 0
         """
@@ -179,10 +182,10 @@ class Agent(object):
             self.state = np.full((len(self.view.model.library)), 0, dtype=int) 
         else:
             #TODO - if needed, we update the statistics
-            self.state = np.full((len(self.view.model.cache_size[self.cache])), 0, dtype=int)
+            self.state = np.full((self.view.model.cache_size[self.cache]), 0, dtype=int)
          
         # Initialize the policy and other neural network optimizers
-        self.policy = Policy(len(self.view.model.library))
+        self.policy = Policy(len(self.view.model.library), len(self.action_choice))
         #print ("POLICY", self.policy)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=3e-2)
         #print ("OPTIMIZER", self.optimizer)
@@ -209,10 +212,15 @@ class Agent(object):
         Decode the action and return a vector of binary values signifying which caches
         should cache what content
         """
-        #print ("Decoded Action : ")
-        #print ([1] + [0] * (len(self.view.model.library) - 1))
-        return np.array([1] + [0] * (len(self.view.model.library) - 1))
-    
+        files_to_cache = self.action_choice[action]
+        files_to_cache = list(files_to_cache)
+        #print ("Files to cache", files_to_cache)
+        action_decoded = np.full((len(self.view.model.library)), 0, dtype=int)
+        for f in files_to_cache:
+            action_decoded[f] = 1
+        print ("Action decoded", action_decoded)
+        return action_decoded
+
     """
     def perform_action(action):
         Decode the actions provided by the policy network
@@ -356,6 +364,8 @@ class NetworkView(object):
         self.model = model
         self.count = 0
         self.common_rewards = 0
+        #Different because other library is a set, here we want to preserve ordering
+        self.lib = [item for item in range(0, len(self.model.library))]
         #Contains the agents as objects of Class Agent
         self.agents = []
         #Creating agents depending on the total number of routers
@@ -715,12 +725,12 @@ class NetworkModel(object):
             for (u, v), delay in list(self.link_delay.items()):
                 self.link_delay[(v, u)] = delay
 
-        cache_size = {}
+        self.cache_size = {}
         for node in topology.nodes():
             stack_name, stack_props = fnss.get_stack(topology, node)
             if stack_name == 'router':
                 if 'cache_size' in stack_props:
-                    cache_size[node] = stack_props['cache_size']
+                    self.cache_size[node] = stack_props['cache_size']
                     self.routers.append(node)
             elif stack_name == 'source':
                 contents = stack_props['contents']
@@ -728,18 +738,18 @@ class NetworkModel(object):
                 for content in contents:
                     self.library.add(content)
                     self.content_source[content] = node
-        if any(c < 1 for c in cache_size.values()):
+        if any(c < 1 for c in self.cache_size.values()):
             logger.warn('Some content caches have size equal to 0. '
                         'I am setting them to 1 and run the experiment anyway')
-            for node in cache_size:
-                if cache_size[node] < 1:
-                    cache_size[node] = 1
+            for node in self.cache_size:
+                if self.cache_size[node] < 1:
+                    self.cache_size[node] = 1
         print ("ROUTERS", self.routers)
         policy_name = cache_policy['name']
         policy_args = {k: v for k, v in cache_policy.items() if k != 'name'}
         # The actual cache objects storing the content
-        self.cache = {node: CACHE_POLICY[policy_name](cache_size[node], **policy_args)
-                          for node in cache_size}
+        self.cache = {node: CACHE_POLICY[policy_name](self.cache_size[node], **policy_args)
+                          for node in self.cache_size}
 
         # This is for a local un-coordinated cache (currently used only by
         # Hashrouting with edge cache)

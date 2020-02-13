@@ -137,7 +137,7 @@ class RlDec(Strategy):
         2. select actions
         3. perform the actions
         """
-        print ("ENV STEP")
+        #print ("ENV STEP")
         for a in self.view.agents:
             curr_state = a.get_state()
             action = a.select_actions(curr_state)
@@ -255,7 +255,7 @@ class RlDec(Strategy):
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
         self.controller.forward_content_path(serving_node, receiver, path)
         self.controller.end_session()
-        print ("Session End")
+        #print ("Session End")
         
 @register_strategy('LCE')
 class LeaveCopyEverywhere(Strategy):

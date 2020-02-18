@@ -12,7 +12,8 @@ LOG_LEVEL = 'INFO'
 
 # If True, executes simulations in parallel using multiple processes
 # to take advantage of multicore CPUs
-PARALLEL_EXECUTION = True
+PARALLEL_EXECUTION = False 
+PARALLEL_EXECUTION_RUNS = False
 
 # Number of processes used to run simulations in parallel.
 # This option is ignored if PARALLEL_EXECUTION = False
@@ -32,7 +33,8 @@ RESULTS_FORMAT = 'PICKLE'
 
 # List of metrics to be measured in the experiments
 # The implementation of data collectors are located in ./icarus/execution/collectors.py
-DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD']
+#DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD']
+DATA_COLLECTORS = ['CACHE_HIT_RATIO']
 
 # Queue of experiments
 EXPERIMENT_QUEUE = deque()
@@ -49,8 +51,8 @@ experiment['topology']['delay'] = 100
 experiment['workload'] = {
          'name':       'STATIONARY',
          'n_contents': 10,
-         'n_warmup':   10 ** 4,
-         'n_measured': 4 * 10 ** 4,
+         'n_warmup':   10 ** 2,
+         'n_measured': 4 * 10 ** 2,
          'alpha':      1.0,
          'rate':       1
                        }

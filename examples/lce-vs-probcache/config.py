@@ -6,6 +6,8 @@ from icarus.util import Tree
 # If True, executes simulations in parallel using multiple processes
 # to take advantage of multicore CPUs
 PARALLEL_EXECUTION = False
+PARALLEL_EXECUTION_RUNS = False
+
 
 # Number of times each experiment is replicated
 N_REPLICATIONS = 1

@@ -368,7 +368,7 @@ class NetworkView(object):
     characteristics of links and currently cached objects in nodes.
     """
 
-    def __init__(self, model):
+    def __init__(self, model, cpus):
         """Constructor
 
         Parameters
@@ -389,7 +389,7 @@ class NetworkView(object):
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
             self.agents.append(Agent(self, r, 0))
-
+        self.agents_per_thread = int(len(self.model.routers)/cpus)
     """
     def env_step():
 
@@ -836,6 +836,7 @@ class NetworkController(object):
             *True* if this session needs to be reported to the collector,
             *False* otherwise
         """
+        print ("Start Session")
         self.session = dict(timestamp=timestamp,
                             receiver=receiver,
                             content=content,
@@ -859,6 +860,7 @@ class NetworkController(object):
             lead to hit a content. It is normally used to calculate latency
             correctly in multicast cases. Default value is *True*
         """
+        print ("Forward Request Path")
         if path is None:
             path = self.model.shortest_path[s][t]
         for u, v in path_links(path):
@@ -882,6 +884,7 @@ class NetworkController(object):
             calculate latency correctly in multicast cases. Default value is
             *True*
         """
+        print ("Forward Content Path")
         if path is None:
             path = self.model.shortest_path[u][v]
         for u, v in path_links(path):

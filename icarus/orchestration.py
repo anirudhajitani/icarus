@@ -19,6 +19,7 @@ from icarus.registry import TOPOLOGY_FACTORY, CACHE_PLACEMENT, CONTENT_PLACEMENT
 from icarus.results import ResultSet
 from icarus.util import SequenceNumber, timestr
 
+from itertools import islice, takewhile, repeat
 
 __all__ = ['Orchestrator', 'run_scenario']
 
@@ -75,12 +76,71 @@ class Orchestrator(object):
         # Calculate number of experiments and number of processes
         self.n_exp = len(queue) * self.settings.N_REPLICATIONS
         self.n_proc = self.settings.N_PROCESSES \
-                      if self.settings.PARALLEL_EXECUTION \
+                      if self.settings.PARALLEL_EXECUTION or self.settings.PARALLEL_EXECUTION_RUNS \
                       else 1
         logger.info('Starting simulations: %d experiments, %d process(es)'
                     % (self.n_exp, self.n_proc))
-
+        
         if self.settings.PARALLEL_EXECUTION:
+            # Run workload in parallel 
+            # Starting from Python 3.2, multiprocessing.Pool.apply_async
+            # accepts a new error_callback argument that is a callable for
+            # returning a message when uncaught errors are thrown.
+            # The following lines ensure compatibility with Python < 3.2
+            callbacks = {"callback": self.experiment_callback}
+            if sys.version_info > (3, 2):
+                callbacks["error_callback"] = self.error_callback
+            job_queue = collections.deque()
+            
+            while queue:
+                experiment = queue.popleft()
+                #Get the workload configs
+                tree = copy.deepcopy(experiment)
+                # Set topology
+                topology_spec = tree['topology']
+                topology_name = topology_spec.pop('name')
+                if topology_name not in TOPOLOGY_FACTORY:
+                    logger.error('No topology factory implementation for %s was found.'
+                                 % topology_name)
+                    return None
+                topology = TOPOLOGY_FACTORY[topology_name](**topology_spec)
+                workload_spec = tree['workload']
+                workload_name = workload_spec.pop('name')
+                if workload_name not in WORKLOAD:
+                    logger.error('No workload implementation named %s was found.'
+                        % workload_name)
+                    return None
+                workload_obj = WORKLOAD[workload_name](topology, **workload_spec)
+                #Now split the workload for different threads
+                cpus = mp.cpu_count()
+                split_every = (lambda n, workload_obj:
+                        takewhile(bool, (list(islice(workload_obj, n)) for _ in repeat(None))))
+                workload_len = sum(1 for _ in iter(workload_obj))
+                requests = list(split_every(int(workload_len/cpus), iter(workload_obj)))
+                for req in requests:
+                    print ("REQ : ", req)
+                    job_queue.append(self.pool.apply_async(run_scenario,
+                            args=(self.settings, experiment,
+                                  self.seq.assign(), self.n_exp, req),
+                            **callbacks))
+            self.pool.close()
+            # This solution is probably not optimal, but at least makes
+            # KeyboardInterrupt work fine, which is crucial if launching the
+            # simulation remotely via screen.
+            # What happens here is that we keep waiting for possible
+            # KeyboardInterrupts till the last process terminates successfully.
+            # We may have to wait up to 5 seconds after the last process
+            # terminates before exiting, which is really negligible
+            try:
+                while job_queue:
+                    job = job_queue.popleft()
+                    while not job.ready():
+                        time.sleep(5)
+            except KeyboardInterrupt:
+                self.pool.terminate()
+            self.pool.join()
+
+        elif self.settings.PARALLEL_EXECUTION_RUNS:
             # Starting from Python 3.2, multiprocessing.Pool.apply_async
             # accepts a new error_callback argument that is a callable for
             # returning a message when uncaught errors are thrown.
@@ -116,7 +176,6 @@ class Orchestrator(object):
             except KeyboardInterrupt:
                 self.pool.terminate()
             self.pool.join()
-
         else:  # Single-process execution
             while queue:
                 experiment = queue.popleft()
@@ -172,7 +231,7 @@ class Orchestrator(object):
                         self.n_success, self.n_fail, n_scheduled, eta)
 
 
-def run_scenario(settings, params, curr_exp, n_exp):
+def run_scenario(settings, params, curr_exp, n_exp, requests=None):
     """Run a single scenario experiment
 
     Parameters
@@ -214,7 +273,8 @@ def run_scenario(settings, params, curr_exp, n_exp):
                          % topology_name)
             return None
         topology = TOPOLOGY_FACTORY[topology_name](**topology_spec)
-
+        
+        # Set workload
         workload_spec = tree['workload']
         workload_name = workload_spec.pop('name')
         if workload_name not in WORKLOAD:
@@ -222,7 +282,7 @@ def run_scenario(settings, params, curr_exp, n_exp):
                          % workload_name)
             return None
         workload = WORKLOAD[workload_name](topology, **workload_spec)
-
+        
         # Assign caches to nodes
         if 'cache_placement' in tree:
             cachepl_spec = tree['cache_placement']
@@ -279,7 +339,7 @@ def run_scenario(settings, params, curr_exp, n_exp):
         collectors = {m: {} for m in metrics}
 
         logger.info('Experiment %d/%d | Start simulation', curr_exp, n_exp)
-        results = exec_experiment(topology, workload, netconf, strategy, cache_policy, collectors)
+        results = exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors)
 
         duration = time.time() - start_time
         logger.info('Experiment %d/%d | End simulation | Duration %s.',

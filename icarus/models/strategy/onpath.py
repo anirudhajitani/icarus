@@ -209,15 +209,19 @@ class RlDec(Strategy):
         return min_delay
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, size, log):
+    def process_event(self, time, lock, receiver, content, size, log):
         # get all required data
         print ("PROCESS EVENT", time, receiver, content)
+        print ("LOCK : ", lock)
+        print ("ID", id(self), id(self.view), id(self.controller))
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
         
         # Route requests to original source and queries caches on the path
+        lock.acquire()
         self.controller.start_session(time, receiver, content, log)
         self.view.count += 1
+        lock.release()
         print ("View Count : ", self.view.count)
         if self.view.count % 50 == 0:
             self.env_step(size) 
@@ -235,12 +239,13 @@ class RlDec(Strategy):
 
         # fetching the data 
         min_path = self.view.shortest_path(receiver, serving_node)
+        lock.acquire()
         for u, v in path_links(min_path):
             self.controller.forward_request_hop(u, v)
             self.controller.get_content(v)
-
         # update the rewards for the episode
         self.view.common_rewards -= min_delay
+        lock.release()
         if self.view.count % 50 == 0:
             for a in self.view.agents:
                 a.rewards -= self.view.common_rewards

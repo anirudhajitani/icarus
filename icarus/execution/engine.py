@@ -8,11 +8,29 @@ and providing them to a strategy instance.
 from icarus.execution import NetworkModel, NetworkView, NetworkController, CollectorProxy
 from icarus.registry import DATA_COLLECTOR, STRATEGY
 
+from itertools import islice, takewhile, repeat
+import multiprocessing as mp
+import threading as th
+import sys
 
 __all__ = ['exec_experiment']
 
 
-def exec_experiment(topology, workload, netconf, strategy, cache_policy, collectors):
+def experiment_callback(args):
+    print ("Run Done!!!!!!!")
+
+def error_callback(args):
+    print ("ERROR!!!!!")
+
+def process_event(lock, requests, strategy):
+    print ("REQUEST PROCESS", requests)
+    for req in requests:
+        print ("Time, Event ", req[0], req[1])
+        print ("IDDDD", id(strategy))
+        strategy.process_event(req[0], lock, **req[1])
+
+
+def exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors):
     """Execute the simulation of a specific scenario.
 
     Parameters
@@ -43,19 +61,42 @@ def exec_experiment(topology, workload, netconf, strategy, cache_policy, collect
     results : Tree
         A tree with the aggregated simulation results from all collectors
     """
+    cpus = mp.cpu_count()
+    print ("CPUS = ", cpus)
     model = NetworkModel(topology, workload, cache_policy, **netconf)
-    view = NetworkView(model)
+    view = NetworkView(model, cpus)
     controller = NetworkController(model)
-
+    print ("Network Done")
     collectors_inst = [DATA_COLLECTOR[name](view, **params)
                        for name, params in collectors.items()]
     collector = CollectorProxy(view, collectors_inst)
     controller.attach_collector(collector)
-
+    print ("Collector done")
     strategy_name = strategy['name']
     strategy_args = {k: v for k, v in strategy.items() if k != 'name'}
     strategy_inst = STRATEGY[strategy_name](view, controller, **strategy_args)
-    for time, event in workload:
-        strategy_inst.process_event(time, **event)
+    print ("Strategy done")
+    #for request in requests:
+    #pool = mp.Pool(cpus)
+    #manager = mp.Manager()
+    #strategy = manager.dict()
+    #strategy['key'] =  strategy_inst
+
+    split_every = (lambda n, workload:
+                takewhile(bool, (list(islice(workload, n)) for _ in repeat(None))))
+    workload_len = sum(1 for _ in iter(workload))
+    requests = list(split_every(int(workload_len/cpus), iter(workload)))
+    callbacks = {"callback": experiment_callback}
+    lock = th.Lock()
+    #if sys.version_info > (3, 2):
+    #    callbacks["error_callback"] = error_callback
+    for req in requests:
+        #pool.apply_async(process_event, args=(req, strategy), callback=experiment_callback)
+        t = th.Thread(target=process_event, args=(lock, req, strategy_inst)) 
+        t.start()
+        t.join()
+    #pool.close()
+    #pool.join()
+    #time.sleep(60)
     print (collector.results()) 
     return collector.results()

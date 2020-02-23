@@ -184,7 +184,6 @@ class Agent(object):
         del self.action_choice
         self.gamma = 0.9
         self.rewards = 0
-        
         """
         if Version == 0
         The state comprises of all the elements currently cached in the router.
@@ -386,10 +385,15 @@ class NetworkView(object):
         self.lib = [item for item in range(0, len(self.model.library))]
         #Contains the agents as objects of Class Agent
         self.agents = []
+        self.cpus = cpus
+        #self.status = [False] * cpus
+        #self.ind_count = [0] * cpus
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
             self.agents.append(Agent(self, r, 0))
-        self.agents_per_thread = int(len(self.model.routers)/cpus)
+        self.agents_per_thread = int(len(self.agents)/cpus)
+        self.extra_agents = len(self.agents) % cpus
+        print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
     """
     def env_step():
 
@@ -794,7 +798,7 @@ class NetworkController(object):
     data collectors of relevant events.
     """
 
-    def __init__(self, model):
+    def __init__(self, model, cpus):
         """Constructor
 
         Parameters
@@ -802,7 +806,7 @@ class NetworkController(object):
         model : NetworkModel
             Instance of the network model
         """
-        self.session = None
+        self.session = dict()
         self.model = model
         self.collector = None
 
@@ -820,7 +824,7 @@ class NetworkController(object):
         """Detach the data collector."""
         self.collector = None
 
-    def start_session(self, timestamp, receiver, content, log):
+    def start_session(self, timestamp, receiver, content, log, inx, count):
         """Instruct the controller to start a new session (i.e. the retrieval
         of a content).
 
@@ -836,15 +840,17 @@ class NetworkController(object):
             *True* if this session needs to be reported to the collector,
             *False* otherwise
         """
-        print ("Start Session")
-        self.session = dict(timestamp=timestamp,
+        print ("Start Session ", inx, count)
+        self.session[inx] = dict(timestamp=timestamp,
                             receiver=receiver,
                             content=content,
-                            log=log)
-        if self.collector is not None and self.session['log']:
+                            log=log,
+                            inx=inx,
+                            count=count)
+        if self.collector is not None and self.session[inx]['log']:
             self.collector.start_session(timestamp, receiver, content)
 
-    def forward_request_path(self, s, t, path=None, main_path=True):
+    def forward_request_path(self, s, t, inx, path=None, main_path=True):
         """Forward a request from node *s* to node *t* over the provided path.
 
         Parameters
@@ -864,9 +870,9 @@ class NetworkController(object):
         if path is None:
             path = self.model.shortest_path[s][t]
         for u, v in path_links(path):
-            self.forward_request_hop(u, v, main_path)
+            self.forward_request_hop(u, v, inx, main_path)
 
-    def forward_content_path(self, u, v, size, path=None, main_path=True):
+    def forward_content_path(self, u, v, size, inx, path=None, main_path=True):
         """Forward a content from node *s* to node *t* over the provided path.
 
         Parameters
@@ -884,13 +890,12 @@ class NetworkController(object):
             calculate latency correctly in multicast cases. Default value is
             *True*
         """
-        print ("Forward Content Path")
         if path is None:
             path = self.model.shortest_path[u][v]
         for u, v in path_links(path):
-            self.forward_content_hop(u, v, size, main_path)
+            self.forward_content_hop(u, v, size, inx, main_path)
 
-    def forward_request_hop(self, u, v, main_path=True):
+    def forward_request_hop(self, u, v, inx, main_path=True):
         """Forward a request over link  u -> v.
 
         Parameters
@@ -904,10 +909,10 @@ class NetworkController(object):
             lead to hit a content. It is normally used to calculate latency
             correctly in multicast cases. Default value is *True*
         """
-        if self.collector is not None and self.session['log']:
+        if self.collector is not None and self.session[inx]['log']:
             self.collector.request_hop(u, v, main_path)
 
-    def forward_content_hop(self, u, v, size, main_path=True):
+    def forward_content_hop(self, u, v, size, inx, main_path=True):
         """Forward a content over link  u -> v.
 
         Parameters
@@ -923,10 +928,10 @@ class NetworkController(object):
             calculate latency correctly in multicast cases. Default value is
             *True*
         """
-        if self.collector is not None and self.session['log']:
+        if self.collector is not None and self.session[inx]['log']:
             self.collector.content_hop(u, v, size, main_path)
 
-    def put_content(self, node, content=None):
+    def put_content(self, node, inx, content=None):
         """Store content in the specified node.
 
         The node must have a cache stack and the actual insertion of the
@@ -947,11 +952,11 @@ class NetworkController(object):
             The evicted object or *None* if no contents were evicted.
         """
         if node in self.model.cache and content is None:
-            return self.model.cache[node].put(self.session['content'])
+            return self.model.cache[node].put(self.session[inx]['content'])
         if node in self.model.cache and content is not None:
             return self.model.cache[node].put(content)
 
-    def get_content(self, node, content=None):
+    def get_content(self, node, inx, content=None):
         """Get a content from a server or a cache.
 
         Parameters
@@ -969,23 +974,23 @@ class NetworkController(object):
         if node in self.model.cache and content is not None:
             return self.model.cache[node].get(content)
         if node in self.model.cache:
-            cache_hit = self.model.cache[node].get(self.session['content'])
+            cache_hit = self.model.cache[node].get(self.session[inx]['content'])
             if cache_hit:
-                if self.session['log']:
+                if self.session[inx]['log']:
                     self.collector.cache_hit(node)
             else:
-                if self.session['log']:
+                if self.session[inx]['log']:
                     self.collector.cache_miss(node)
             return cache_hit
         name, props = fnss.get_stack(self.model.topology, node)
-        if name == 'source' and self.session['content'] in props['contents']:
-            if self.collector is not None and self.session['log']:
+        if name == 'source' and self.session[inx]['content'] in props['contents']:
+            if self.collector is not None and self.session[inx]['log']:
                 self.collector.server_hit(node)
             return True
         else:
             return False
 
-    def remove_content(self, node, content=None):
+    def remove_content(self, node, inx, content=None):
         """Remove the content being handled from the cache
 
         Parameters
@@ -1001,11 +1006,11 @@ class NetworkController(object):
             *True* if the entry was in the cache, *False* if it was not.
         """
         if node in self.model.cache and content is None:
-            return self.model.cache[node].remove(self.session['content'])
+            return self.model.cache[node].remove(self.session[inx]['content'])
         if node in self.model.cache and content is not None:
             return self.model.cache[node].remove(content)
 
-    def end_session(self, success=True):
+    def end_session(self, inx, success=True):
         """Close a session
 
         Parameters
@@ -1013,9 +1018,9 @@ class NetworkController(object):
         success : bool, optional
             *True* if the session was completed successfully, *False* otherwise
         """
-        if self.collector is not None and self.session['log']:
+        if self.collector is not None and self.session[inx]['log']:
             self.collector.end_session(success)
-        self.session = None
+        self.session[inx] = None
 
     def rewire_link(self, u, v, up, vp, recompute_paths=True):
         """Rewire an existing link to new endpoints

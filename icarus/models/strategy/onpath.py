@@ -4,6 +4,7 @@ import random
 
 import networkx as nx
 import sys
+import time
 
 from icarus.registry import register_strategy
 from icarus.util import inheritdoc, path_links
@@ -128,8 +129,17 @@ class RlDec(Strategy):
     @inheritdoc(Strategy)
     def __init__(self, view, controller):
         super(RlDec, self).__init__(view, controller)
+    
+    def get_agent_indexes(self, inx):
+        start = inx * self.view.agents_per_thread
+        if (start + self.view.agents_per_thread + self.view.extra_agents == len(self.view.agents)):
+            end = len(self.view.agents)
+        else:
+            end = start + self.view.agents_per_thread
+        print ("Index = ", inx, start, end)
+        return start, end
 
-    def env_step(self, size):
+    def env_step(self, size, inx, lock):
         """
 
         A step of the environment includes the following for all agents:
@@ -138,25 +148,27 @@ class RlDec(Strategy):
         3. perform the actions
         """
         #print ("ENV STEP")
-        for a in self.view.agents:
-            curr_state = a.get_state()
-            action = a.select_actions(curr_state)
-            action = a.decode_action(action)
-            a.rewards -= self.perform_action(action, a.cache, size)
+        start, end = self.get_agent_indexes(inx)
+        for i in range(start,end):
+            curr_state = self.view.agents[i].get_state()
+            action = self.view.agents[i].select_actions(curr_state)
+            action = self.view.agents[i].decode_action(action)
+            self.view.agents[i].rewards -= self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
 
-    def update_gradients(self):
+    def update_gradients(self, inx):
         """
 
         Get the rewards from the environment
         Append the rewards to the rewards data structure accessed by the policy class
         Perform actor-critic update
         """
+        start, end = self.get_agent_indexes(inx)
         #print ("UPGARDE GRADIENTS")
-        for a in self.view.agents:
-            a.update()
+        for i in range(start, end):
+            self.view.agents[i].update()
 
 
-    def perform_action(self,action, cache, size):
+    def perform_action(self,action, cache, size, inx, lock):
         """
         Decode the actions provided by the policy network
         Cache files according to the action selected
@@ -173,7 +185,7 @@ class RlDec(Strategy):
         for a in range(action.size):
             if action[a] == 1:
                 #here get_content called without content so cache hit/miss can be computed,
-                if self.controller.get_content(cache, a+1) is False:
+                if self.controller.get_content(cache, inx, a+1) is False:
                     add_contents.append(a+1)
             else:
                 if a+1 in existing_contents:
@@ -184,7 +196,8 @@ class RlDec(Strategy):
     
         min_delay = sys.maxsize
         for rc in remove_contents:
-            self.controller.remove_content(cache, rc)
+            self.controller.remove_content(cache, inx, rc)
+        lock.acquire()
         for ac in add_contents:
             # Get location of all nodes that has the content stored
             content_loc = self.view.content_locations(ac)
@@ -198,33 +211,35 @@ class RlDec(Strategy):
             # fetching the data
             min_path = self.view.shortest_path(cache, serving_node)
             for u, v in path_links(min_path):
-                self.controller.forward_request_hop(u, v)
+                self.controller.forward_request_hop(u, v, inx)
 
             # update the rewards for the episode
             #print ("DELAY IN FETCHING", min_delay)
             path = list(reversed(self.view.shortest_path(cache, serving_node)))
-            self.controller.forward_content_path(serving_node, cache, size, path)
-            self.controller.put_content(cache, ac)
-        print ("CACHE DUMP ", cache, " = ", self.view.cache_dump(cache))
+            self.controller.forward_content_path(serving_node, cache, size, inx, path)
+            self.controller.put_content(cache, ac, inx)
+        lock.release()
+        #print ("CACHE DUMP ", cache, " = ", self.view.cache_dump(cache))
         return min_delay
 
     @inheritdoc(Strategy)
-    def process_event(self, time, lock, receiver, content, size, log):
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
-        print ("PROCESS EVENT", time, receiver, content)
-        print ("LOCK : ", lock)
-        print ("ID", id(self), id(self.view), id(self.controller))
+        #print ("PROCESS EVENT", time, receiver, content)
+        #print ("LOCK : ", lock)
+        #print ("ID", id(self), id(self.view), id(self.controller))
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
-        
+        #self.view.ind_count[inx] = count 
         # Route requests to original source and queries caches on the path
         lock.acquire()
-        self.controller.start_session(time, receiver, content, log)
+        self.controller.start_session(time, receiver, content, log, inx, count)
         self.view.count += 1
         lock.release()
-        print ("View Count : ", self.view.count)
-        if self.view.count % 50 == 0:
-            self.env_step(size) 
+        print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
+        #if self.view.count % 50 == 0:
+        if count % 50 == 0:
+            self.env_step(size, inx, lock) 
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
         min_delay = sys.maxsize
@@ -241,25 +256,58 @@ class RlDec(Strategy):
         min_path = self.view.shortest_path(receiver, serving_node)
         lock.acquire()
         for u, v in path_links(min_path):
-            self.controller.forward_request_hop(u, v)
-            self.controller.get_content(v)
+            self.controller.forward_request_hop(u, v, inx)
+            self.controller.get_content(v, inx)
         # update the rewards for the episode
         self.view.common_rewards -= min_delay
         lock.release()
-        if self.view.count % 50 == 0:
-            for a in self.view.agents:
-                a.rewards -= self.view.common_rewards
-                a.policy.rewards.append(a.rewards)
-                a.rewards = 0
+        """
+        if self.view.ind_count[inx] % 50 == 0:
+            #while not all(item == self.view.ind_count[inx] for item in self.view.ind_count):
+            while not self.view.ind_count.count(self.view.ind_count[0]) == len(self.view.ind_count):
+                print (self.view.count, self.view.ind_count[inx], inx)
+                continue
+        #if self.view.ind_count[inx] % 50 == 0 and all(item == self.view.ind_count[inx] for item in self.view.ind_count):
+        if self.view.ind_count[inx] % 50 == 0 and self.view.ind_count.count(self.view.ind_count[0]) == len(self.view.ind_count):
+            print ("REWARD GIVEN")
+            self.view.status[inx] = False
+            start, end = self.get_agent_indexes(inx)
+            for i in range(start,end):
+                self.view.agents[i].rewards -= self.view.common_rewards
+                self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
+                self.view.agents[i].rewards = 0
             self.view.common_rewards = 0
+            self.view.status[inx] = True
+            while not all(item == True for item in self.view.status):
+                print ("Waiting ", self.view.count, self.view.ind_count[inx], inx)
+                #print ("Waiting for all")
+                continue
+            print ("DONE  ", inx, " ", count, " ", self.view.count)
+            #time.sleep(100)
             #print ("AGENT ", a , " REWARDS ", a.policy.rewards.append)
-        if self.view.count % 500 == 0:
-            self.update_gradients()
+        """
+        #"""
+        #if self.view.ind_count[inx] % 50 == 0:
+        if count % 50 == 0:
+            barrier.wait() 
+            start, end = self.get_agent_indexes(inx)
+            for i in range(start,end):
+                self.view.agents[i].rewards -= self.view.common_rewards
+                self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
+                self.view.agents[i].rewards = 0
+            self.view.common_rewards = 0
+            barrier.wait()
+        #"""
+        if count % 200 == 0:
+            self.update_gradients(inx)
         # Return content
         #print ("Serving Node", serving_node)
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
-        self.controller.forward_content_path(serving_node, receiver, size, path)
-        self.controller.end_session()
+        lock.acquire()
+        #print ("LOCK ACQUIRED ", inx, count)
+        self.controller.forward_content_path(serving_node, receiver, size, inx, path)
+        self.controller.end_session(inx)
+        lock.release()
         #print ("Session End")
         
 @register_strategy('LCE')

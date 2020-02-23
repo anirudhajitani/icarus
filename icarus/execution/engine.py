@@ -22,12 +22,12 @@ def experiment_callback(args):
 def error_callback(args):
     print ("ERROR!!!!!")
 
-def process_event(lock, requests, strategy):
+def process_event(lock, barrier, requests, strategy, inx):
     print ("REQUEST PROCESS", requests)
-    for req in requests:
+    for i, req in enumerate(requests):
         print ("Time, Event ", req[0], req[1])
         print ("IDDDD", id(strategy))
-        strategy.process_event(req[0], lock, **req[1])
+        strategy.process_event(req[0], lock, barrier, inx, i+1, **req[1])
 
 
 def exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors):
@@ -65,7 +65,7 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     print ("CPUS = ", cpus)
     model = NetworkModel(topology, workload, cache_policy, **netconf)
     view = NetworkView(model, cpus)
-    controller = NetworkController(model)
+    controller = NetworkController(model, cpus)
     print ("Network Done")
     collectors_inst = [DATA_COLLECTOR[name](view, **params)
                        for name, params in collectors.items()]
@@ -88,13 +88,18 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     requests = list(split_every(int(workload_len/cpus), iter(workload)))
     callbacks = {"callback": experiment_callback}
     lock = th.Lock()
+    barrier = th.Barrier(cpus)
+    jobs = []
     #if sys.version_info > (3, 2):
     #    callbacks["error_callback"] = error_callback
-    for req in requests:
+    for inx, req in enumerate(requests):
         #pool.apply_async(process_event, args=(req, strategy), callback=experiment_callback)
-        t = th.Thread(target=process_event, args=(lock, req, strategy_inst)) 
-        t.start()
-        t.join()
+        t = th.Thread(target=process_event, args=(lock, barrier, req, strategy_inst, inx)) 
+        jobs.append(t)
+    for j in jobs:
+        j.start()
+    for j in jobs:
+        j.join()
     #pool.close()
     #pool.join()
     #time.sleep(60)

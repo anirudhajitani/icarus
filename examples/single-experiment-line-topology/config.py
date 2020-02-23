@@ -44,15 +44,15 @@ experiment = Tree()
 
 # Set topology
 experiment['topology']['name'] = 'PATH'
-experiment['topology']['n'] = 5
+experiment['topology']['n'] = 100
 experiment['topology']['delay'] = 100
 
 # Set workload
 experiment['workload'] = {
          'name':       'STATIONARY',
-         'n_contents': 10,
-         'n_warmup':   10 ** 2,
-         'n_measured': 4 * 10 ** 2,
+         'n_contents': 20,
+         'n_warmup':   10 ** 3,
+         'n_measured': 12 * 10 ** 3,
          'alpha':      1.0,
          'rate':       1
                        }

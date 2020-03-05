@@ -383,7 +383,7 @@ class CacheHitRatioCollector(DataCollector):
     @inheritdoc(DataCollector)
     def start_session(self, timestamp, receiver, content):
         self.sess_count += 1
-        print ("SESSION COUNT", self.sess_count)
+        #print ("SESSION COUNT", self.sess_count)
         if self.off_path_hits:
             source = self.view.content_source(content)
             self.curr_path = self.view.shortest_path(receiver, source)

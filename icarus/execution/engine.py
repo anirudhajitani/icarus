@@ -25,8 +25,8 @@ def error_callback(args):
 def process_event(lock, barrier, requests, strategy, inx):
     print ("REQUEST PROCESS", requests)
     for i, req in enumerate(requests):
-        print ("Time, Event ", req[0], req[1])
-        print ("IDDDD", id(strategy))
+        #print ("Time, Event ", req[0], req[1])
+        #print ("IDDDD", id(strategy))
         strategy.process_event(req[0], lock, barrier, inx, i+1, **req[1])
 
 

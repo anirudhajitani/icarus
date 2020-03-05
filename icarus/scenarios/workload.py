@@ -94,8 +94,10 @@ class StationaryWorkload(object):
         self.zipf = TruncatedZipfDist(alpha, n_contents)
         self.n_contents = n_contents
         self.contents = range(1, n_contents + 1)
-        #Random length of contents
-        self.contents_len = np.random.randint(1,10,n_contents)
+        #Random length of contents (uncomment this for varying content len
+        #self.contents_len = np.random.randint(1,10,n_contents)
+        #All contents are of size 1
+        self.contents_len = np.ones((n_contents), dtype=int)
         self.alpha = alpha
         self.rate = rate
         self.n_warmup = n_warmup

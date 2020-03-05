@@ -136,7 +136,7 @@ class RlDec(Strategy):
             end = len(self.view.agents)
         else:
             end = start + self.view.agents_per_thread
-        print ("Index = ", inx, start, end)
+        #print ("Index = ", inx, start, end)
         return start, end
 
     def env_step(self, size, inx, lock):
@@ -150,7 +150,8 @@ class RlDec(Strategy):
         #print ("ENV STEP")
         start, end = self.get_agent_indexes(inx)
         for i in range(start,end):
-            curr_state = self.view.agents[i].get_state()
+            curr_state = self.view.agents[i].get_state_2()
+            print ("STATE for ", i, " = ", curr_state)
             action = self.view.agents[i].select_actions(curr_state)
             action = self.view.agents[i].decode_action(action)
             self.view.agents[i].rewards -= self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
@@ -236,7 +237,7 @@ class RlDec(Strategy):
         self.controller.start_session(time, receiver, content, log, inx, count)
         self.view.count += 1
         lock.release()
-        print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
+        #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:
         if count % 50 == 0:
             self.env_step(size, inx, lock) 
@@ -258,6 +259,10 @@ class RlDec(Strategy):
         for u, v in path_links(min_path):
             self.controller.forward_request_hop(u, v, inx)
             self.controller.get_content(v, inx)
+            if v in self.view.model.routers:
+                agent_inx = self.view.model.routers.index(v)
+                #print ("TYPE" , type(self.view.agents[agent_inx].state_counts))
+                self.view.agents[agent_inx].state_counts[content-1] += 1
         # update the rewards for the episode
         self.view.common_rewards -= min_delay
         lock.release()
@@ -294,8 +299,10 @@ class RlDec(Strategy):
             for i in range(start,end):
                 self.view.agents[i].rewards -= self.view.common_rewards
                 self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
-                self.view.agents[i].rewards = 0
-            self.view.common_rewards = 0
+                self.view.agents[i].rewards *= 0
+                self.view.agents[i].state_counts *= 0
+                #print ("TYPE 2" , type(self.view.agents[agent_inx].state_counts))
+            self.view.common_rewards *= 0
             barrier.wait()
         #"""
         if count % 200 == 0:

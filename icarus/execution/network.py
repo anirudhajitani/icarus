@@ -197,6 +197,7 @@ class Agent(object):
         #self.action_space = combinations(
         if self.state_ver == 0:
             self.state = np.full((len(self.view.model.library)), 0, dtype=int) 
+            self.state_counts = np.full((len(self.view.model.library)), 0, dtype=int) 
         else:
             #TODO - if needed, we update the statistics
             self.state = np.full((self.view.model.cache_size[self.cache]), 0, dtype=int)
@@ -223,7 +224,13 @@ class Agent(object):
         #print ("Agent State ", self.cache, " : ")
         #print (self.state)
         return self.state
-
+    
+    def get_state_2(self):
+        """
+        Returns the current state of the cache.
+        """
+        return self.state_counts
+    
     def decode_action(self, action):
         """
         Decode the action and return a vector of binary values signifying which caches
@@ -750,6 +757,8 @@ class NetworkModel(object):
         self.cache_size = {}
         for node in topology.nodes():
             stack_name, stack_props = fnss.get_stack(topology, node)
+            #print ("_____________", type(stack_props))
+            #print (node, list(topology.neighbors(node)))
             if stack_name == 'router':
                 if 'cache_size' in stack_props:
                     self.cache_size[node] = stack_props['cache_size']
@@ -840,7 +849,7 @@ class NetworkController(object):
             *True* if this session needs to be reported to the collector,
             *False* otherwise
         """
-        print ("Start Session ", inx, count)
+        #print ("Start Session ", inx, count)
         self.session[inx] = dict(timestamp=timestamp,
                             receiver=receiver,
                             content=content,

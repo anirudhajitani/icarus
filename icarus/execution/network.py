@@ -19,6 +19,7 @@ import fnss
 
 from itertools import count
 from itertools import combinations
+import collections
 from collections import namedtuple
 import numpy as np
 import torch
@@ -165,8 +166,11 @@ class Agent(object):
         #If all cache are equal size, can be moved to model
         self.action_choice = []
         self.valid_action = []
+        #self.indexes = np.zeros((self.view.model.cache_size[self.cache]), dtype=float)
+        self.indexes = dict()
         #All possible combinations of files (assuming minimum size of file is 1)
         print ("Cache size : ", self.view.model.cache_size[self.cache])
+        """
         for i in range(1, self.view.model.cache_size[self.cache] + 1):
             self.action_choice.extend(list(combinations(self.view.lib, i))) 
         #print ("Action choices : ", self.action_choice)
@@ -182,8 +186,10 @@ class Agent(object):
         print ("Content Lens : " ,self.view.model.workload.contents_len)
         print ("Action choices after : ", self.valid_action)
         del self.action_choice
+        """
         self.gamma = 0.9
         self.rewards = 0
+        self.requests = collections.deque(maxlen=100)
         """
         if Version == 0
         The state comprises of all the elements currently cached in the router.

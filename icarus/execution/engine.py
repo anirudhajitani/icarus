@@ -23,7 +23,7 @@ def error_callback(args):
     print ("ERROR!!!!!")
 
 def process_event(lock, barrier, requests, strategy, inx):
-    print ("REQUEST PROCESS", requests)
+    #print ("REQUEST PROCESS", requests)
     for i, req in enumerate(requests):
         #print ("Time, Event ", req[0], req[1])
         #print ("IDDDD", id(strategy))

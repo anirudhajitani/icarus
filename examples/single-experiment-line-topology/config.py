@@ -44,8 +44,8 @@ experiment = Tree()
 
 # Set topology
 experiment['topology']['name'] = 'PATH'
-experiment['topology']['n'] = 100
-experiment['topology']['delay'] = 100
+experiment['topology']['n'] = 10
+experiment['topology']['delay'] = 40
 
 # Set workload
 experiment['workload'] = {
@@ -59,7 +59,7 @@ experiment['workload'] = {
 
 # Set cache placement
 experiment['cache_placement']['name'] = 'UNIFORM'
-experiment['cache_placement']['network_cache'] = 0.5
+experiment['cache_placement']['network_cache'] = 0.1
 
 # Set content placement
 experiment['content_placement']['name'] = 'UNIFORM'

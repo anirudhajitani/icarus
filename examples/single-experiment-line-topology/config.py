@@ -51,8 +51,8 @@ experiment['topology']['delay'] = 40
 experiment['workload'] = {
          'name':       'STATIONARY',
          'n_contents': 20,
-         'n_warmup':   10 ** 3,
-         'n_measured': 12 * 10 ** 3,
+         'n_warmup':   10 ** 5,
+         'n_measured': 12 * 10 ** 5,
          'alpha':      1.0,
          'rate':       1
                        }

@@ -64,11 +64,11 @@ NETWORK_REQUEST_RATE = 12.0
 
 # Number of content requests generated to prepopulate the caches
 # These requests are not logged
-N_WARMUP_REQUESTS = 1 * 10 ** 8
+N_WARMUP_REQUESTS = 1 * 10 ** 5
 
 # Number of content requests generated after the warmup and logged
 # to generate results.
-N_MEASURED_REQUESTS = 6 * 10 ** 8
+N_MEASURED_REQUESTS = 6 * 10 ** 5
 
 # List of all implemented topologies
 # Topology implementations are located in ./icarus/scenarios/topology.py
@@ -115,21 +115,21 @@ default['content_placement']['name'] = 'UNIFORM'
 default['cache_policy']['name'] = CACHE_POLICY
 
 # Create experiments multiplexing all desired parameters
-#for alpha in ALPHA:
-#    for strategy in STRATEGIES:
-#        for topology in TOPOLOGIES:
-#            for network_cache in NETWORK_CACHE:
-#                experiment = copy.deepcopy(default)
-#                experiment['workload']['alpha'] = alpha
-#                experiment['strategy']['name'] = strategy
-#                experiment['topology']['name'] = topology
-#                experiment['cache_placement']['network_cache'] = network_cache
-#                experiment['desc'] = "Alpha: %s, strategy: %s, topology: %s, network cache: %s" \
-#                                     % (str(alpha), strategy, topology, str(network_cache))
-#                EXPERIMENT_QUEUE.append(experiment)
+for alpha in ALPHA:
+    for strategy in STRATEGIES:
+        for topology in TOPOLOGIES:
+            for network_cache in NETWORK_CACHE:
+                experiment = copy.deepcopy(default)
+                experiment['workload']['alpha'] = alpha
+                experiment['strategy']['name'] = strategy
+                experiment['topology']['name'] = topology
+                experiment['cache_placement']['network_cache'] = network_cache
+                experiment['desc'] = "Alpha: %s, strategy: %s, topology: %s, network cache: %s" \
+                                     % (str(alpha), strategy, topology, str(network_cache))
+                EXPERIMENT_QUEUE.append(experiment)
 
 
-
+"""
 experiment = copy.deepcopy(default)
 experiment['workload']['alpha'] = 0.7
 experiment['strategy']['name'] = 'RL_DEC'
@@ -137,3 +137,4 @@ experiment['topology']['name'] = 'GEANT'
 experiment['cache_placement']['network_cache'] = 0.2
 experiment['desc'] = "Alpha: 0.7, strategy: RL_DEC, topology: GEANT, network cache: 0.2"
 EXPERIMENT_QUEUE.append(experiment)
+"""

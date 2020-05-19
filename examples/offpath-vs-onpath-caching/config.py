@@ -30,7 +30,7 @@ RESULTS_FORMAT = 'PICKLE'
 
 # Number of times each experiment is replicated
 # This is necessary for extracting confidence interval of selected metrics
-N_REPLICATIONS = 2
+N_REPLICATIONS = 1
 
 # List of metrics to be measured in the experiments
 # The implementation of data collectors are located in ./icarus/execution/collectors.py
@@ -48,13 +48,15 @@ DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD', 'PATH_STRETCH']
 # This would give problems while trying to plot the results because if for
 # example I wanted to filter experiment with alpha=0.8, experiments with
 # alpha = 0.799999999999 would not be recognized
-ALPHA = [0.6, 0.8, 1.0, 1.2]
+#ALPHA = [0.6, 0.8, 1.0, 1.2]
+ALPHA = [0.8, 1.0, 1.2]
 
 # Total size of network cache as a fraction of content population
-NETWORK_CACHE = [0.004, 0.002, 0.01, 0.05]
+#NETWORK_CACHE = [0.004, 0.002, 0.01, 0.05]
+NETWORK_CACHE = [0.002, 0.01, 0.05]
 
 # Number of content objects
-N_CONTENTS = 3 * 10 ** 5
+N_CONTENTS = 3 * 10 ** 3
 
 # Number of requests per second (over the whole network)
 NETWORK_REQUEST_RATE = 12.0
@@ -81,14 +83,14 @@ TOPOLOGIES = [
 STRATEGIES = [
      'LCE',  # Leave Copy Everywhere
      'NO_CACHE',  # No caching, shorest-path routing
-     'HR_SYMM',  # Symmetric hash-routing
-     'HR_ASYMM',  # Asymmetric hash-routing
-     'HR_MULTICAST',  # Multicast hash-routing
-     'HR_HYBRID_AM',  # Hybrid Asymm-Multicast hash-routing
-     'HR_HYBRID_SM',  # Hybrid Symm-Multicast hash-routing
-     'CL4M',  # Cache less for more
+     #'HR_SYMM',  # Symmetric hash-routing
+     #'HR_ASYMM',  # Asymmetric hash-routing
+     #'HR_MULTICAST',  # Multicast hash-routing
+     #'HR_HYBRID_AM',  # Hybrid Asymm-Multicast hash-routing
+     #'HR_HYBRID_SM',  # Hybrid Symm-Multicast hash-routing
+     #'CL4M',  # Cache less for more
      'PROB_CACHE',  # ProbCache
-     'LCD',  # Leave Copy Down
+     #'LCD',  # Leave Copy Down
      'RAND_CHOICE',  # Random choice: cache in one random cache on path
      'RAND_BERNOULLI',  # Random Bernoulli: cache randomly in caches on path
              ]

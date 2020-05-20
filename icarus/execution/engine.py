@@ -30,7 +30,7 @@ def process_event(lock, barrier, requests, strategy, inx):
         strategy.process_event(req[0], lock, barrier, inx, i+1, **req[1])
 
 
-def exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors):
+def exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp):
     """Execute the simulation of a specific scenario.
 
     Parameters
@@ -64,7 +64,7 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     cpus = mp.cpu_count()
     print ("CPUS = ", cpus)
     model = NetworkModel(topology, workload, cache_policy, **netconf)
-    view = NetworkView(model, cpus)
+    view = NetworkView(model, cpus, nnp)
     controller = NetworkController(model, cpus)
     print ("Network Done")
     collectors_inst = [DATA_COLLECTOR[name](view, **params)

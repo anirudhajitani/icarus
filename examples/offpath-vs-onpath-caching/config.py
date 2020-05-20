@@ -35,8 +35,8 @@ N_REPLICATIONS = 2
 
 # List of metrics to be measured in the experiments
 # The implementation of data collectors are located in ./icarus/execution/collectors.py
-#DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD', 'PATH_STRETCH']
-DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD']
+DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD', 'PATH_STRETCH']
+#DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD']
 
 # Range of alpha values of the Zipf distribution using to generate content requests
 # alpha values must be positive. The greater the value the more skewed is the
@@ -50,25 +50,25 @@ DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD']
 # This would give problems while trying to plot the results because if for
 # example I wanted to filter experiment with alpha=0.8, experiments with
 # alpha = 0.799999999999 would not be recognized
-ALPHA = [0.6, 0.8, 1.0, 1.2]
+ALPHA = [0.6, 1.0, 1.4, 2.0]
 
 # Total size of network cache as a fraction of content population
-NETWORK_CACHE = [0.004, 0.002, 0.01, 0.05]
+NETWORK_CACHE = [0.05, 0.1, 0.5, 1]
 
 # Number of content objects
 #N_CONTENTS = 3 * 10 ** 5
-N_CONTENTS = 6 * 100
+N_CONTENTS = 3 * 10 ** 5
 
 # Number of requests per second (over the whole network)
 NETWORK_REQUEST_RATE = 12.0
 
 # Number of content requests generated to prepopulate the caches
 # These requests are not logged
-N_WARMUP_REQUESTS = 1 * 10 ** 5
+N_WARMUP_REQUESTS = 1 * 10 ** 7
 
 # Number of content requests generated after the warmup and logged
 # to generate results.
-N_MEASURED_REQUESTS = 6 * 10 ** 5
+N_MEASURED_REQUESTS = 6 * 10 ** 7
 
 # List of all implemented topologies
 # Topology implementations are located in ./icarus/scenarios/topology.py
@@ -77,18 +77,15 @@ TOPOLOGIES = [
         'WIDE',
         'GARR',
         'TISCALI',
+        'ROCKET_FUEL',
               ]
 
 # List of caching and routing strategies
 # The code is located in ./icarus/models/strategy.py
 STRATEGIES = [
+     'INDEX', # Index
      'LCE',  # Leave Copy Everywhere
      'NO_CACHE',  # No caching, shorest-path routing
-     'HR_SYMM',  # Symmetric hash-routing
-     'HR_ASYMM',  # Asymmetric hash-routing
-     'HR_MULTICAST',  # Multicast hash-routing
-     'HR_HYBRID_AM',  # Hybrid Asymm-Multicast hash-routing
-     'HR_HYBRID_SM',  # Hybrid Symm-Multicast hash-routing
      'CL4M',  # Cache less for more
      'PROB_CACHE',  # ProbCache
      'LCD',  # Leave Copy Down

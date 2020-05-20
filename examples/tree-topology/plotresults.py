@@ -42,7 +42,7 @@ PLOT_EMPTY_GRAPHS = True
 # On-path strategies: dashed lines
 # No-cache: dotted line
 STRATEGY_STYLE = {
-         'INDEX':         'b-o',
+         'INDEX':           'b-o',
          'LCE':             'b--p',
          'LCD':             'g-->',
          'CL4M':            'g-->',
@@ -55,9 +55,9 @@ STRATEGY_STYLE = {
 
 # This dict maps name of strategies to names to be displayed in the legend
 STRATEGY_LEGEND = {
+         'INDEX':           'INDEX',
          'LCE':             'LCE',
          'LCD':             'LCD',
-         'INDEX':           'INDEX',
          'CL4M':            'CL4M',
          'PROB_CACHE':      'ProbCache',
          'RAND_CHOICE':     'Random (choice)',
@@ -78,7 +78,7 @@ STRATEGY_BAR_HATCH = {
     'LCE':          None,
     'LCD':          '//',
     'NO_CACHE':     'x',
-    'INDEX':        '+',
+    'INDEX':        '+'
     }
 
 
@@ -294,7 +294,7 @@ def run(config, results, plotdir):
     if not os.path.exists(plotdir):
         os.makedirs(plotdir)
     # Parse params from settings
-    topologies = settings.TOPOLOGIES
+    topologies = ['TREE']
     cache_sizes = settings.NETWORK_CACHE
     alphas = settings.ALPHA
     strategies = settings.STRATEGIES

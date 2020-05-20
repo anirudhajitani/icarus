@@ -53,7 +53,7 @@ class Orchestrator(object):
         self.n_fail = 0
         self.summary_freq = summary_freq
         self._stop = False
-        if self.settings.PARALLEL_EXECUTION:
+        if self.settings.PARALLEL_EXECUTION_RUNS:
             self.pool = mp.Pool(settings.N_PROCESSES)
 
     def stop(self):
@@ -61,7 +61,7 @@ class Orchestrator(object):
         """
         logger.info('Orchestrator is stopping')
         self._stop = True
-        if self.settings.PARALLEL_EXECUTION:
+        if self.settings.PARALLEL_EXECUTION_RUNS:
             self.pool.terminate()
             self.pool.join()
 
@@ -338,9 +338,15 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
             return None
 
         collectors = {m: {} for m in metrics}
+        
+        nnp = dict()
+        if 'nnp' in tree:
+            nnp['window'] = tree['nnp']['window']
+            nnp['lr'] = tree['nnp']['lr']
+            nnp['gamma'] = tree['nnp']['gamma']
 
         logger.info('Experiment %d/%d | Start simulation', curr_exp, n_exp)
-        results = exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors)
+        results = exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp)
 
         duration = time.time() - start_time
         logger.info('Experiment %d/%d | End simulation | Duration %s.',

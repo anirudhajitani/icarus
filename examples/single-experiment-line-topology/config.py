@@ -33,8 +33,8 @@ RESULTS_FORMAT = 'PICKLE'
 
 # List of metrics to be measured in the experiments
 # The implementation of data collectors are located in ./icarus/execution/collectors.py
-#DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD']
-DATA_COLLECTORS = ['CACHE_HIT_RATIO']
+DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD', 'PATH_STRETCH']
+#DATA_COLLECTORS = ['CACHE_HIT_RATIO']
 
 # Queue of experiments
 EXPERIMENT_QUEUE = deque()
@@ -43,8 +43,9 @@ EXPERIMENT_QUEUE = deque()
 experiment = Tree()
 
 # Set topology
-experiment['topology']['name'] = 'PATH'
-experiment['topology']['n'] = 10
+experiment['topology']['name'] = 'TREE'
+experiment['topology']['k'] = 2
+experiment['topology']['h'] = 3
 experiment['topology']['delay'] = 40
 
 # Set workload
@@ -68,7 +69,7 @@ experiment['content_placement']['name'] = 'UNIFORM'
 experiment['cache_policy']['name'] = 'LRU'
 
 # Set caching meta-policy
-experiment['strategy']['name'] = 'RL_DEC'
+experiment['strategy']['name'] = 'NO_CACHE'
 
 # Description of the experiment
 experiment['desc'] = "Line topology with 10 nodes"

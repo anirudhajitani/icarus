@@ -32,7 +32,7 @@ class Strategy(object):
         self.controller = controller
 
     @abc.abstractmethod
-    def process_event(self, time, receiver, content, size, log):
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         """Process an event received from the simulation engine.
 
         This event is processed by executing relevant actions of the network
@@ -69,15 +69,17 @@ class NoCache(Strategy):
         super(NoCache, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, size, log):
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
         # Route requests to original source
-        self.controller.start_session(time, receiver, content, log)
-        self.controller.forward_request_path(receiver, source)
-        self.controller.get_content(source)
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
+        self.controller.forward_request_path(receiver, source, inx)
+        self.controller.get_content(source, inx)
         # Route content back to receiver
         path = list(reversed(path))
-        self.controller.forward_content_path(source, receiver, size, path)
-        self.controller.end_session()
+        self.controller.forward_content_path(source, receiver, size, inx, path)
+        self.controller.end_session(inx)
+        lock.release()

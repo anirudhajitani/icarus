@@ -150,7 +150,7 @@ class Agent(object):
     is executing.
     """
 
-    def __init__(self, view, router, ver):
+    def __init__(self, view, router, ver, gamma=0.9, lr=3e-2, window=250):
         """Constructor
         
         Parameters
@@ -187,10 +187,10 @@ class Agent(object):
         print ("Action choices after : ", self.valid_action)
         del self.action_choice
         """
-        self.gamma = 0.9
+        self.gamma = gamma
         self.rewards = 0
         #Try to change this and see the behavior
-        self.requests = collections.deque(maxlen=100)
+        self.requests = collections.deque(maxlen=window)
         """
         if Version == 0
         The state comprises of all the elements currently cached in the router.
@@ -381,7 +381,7 @@ class NetworkView(object):
     characteristics of links and currently cached objects in nodes.
     """
 
-    def __init__(self, model, cpus):
+    def __init__(self, model, cpus, nnp):
         """Constructor
 
         Parameters
@@ -400,14 +400,20 @@ class NetworkView(object):
         #Contains the agents as objects of Class Agent
         self.agents = []
         self.cpus = cpus
+        if 'lr' not in nnp:
+            nnp['lr'] = 3e-2
+        if 'gamma' not in nnp:
+            nnp['gamma'] = 0.9
+        if 'window' not in nnp:
+            nnp['window'] = 250
         #self.status = [False] * cpus
         #self.ind_count = [0] * cpus
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
-            self.agents.append(Agent(self, r, 0))
+            self.agents.append(Agent(self, r, 0, nnp['gamma'], nnp['lr'], nnp['window']))
         self.agents_per_thread = int(len(self.agents)/cpus)
         self.extra_agents = len(self.agents) % cpus
-        print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
+        #print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
     """
     def env_step():
 
@@ -732,10 +738,10 @@ class NetworkModel(object):
         self.shortest_path = dict(shortest_path) if shortest_path is not None \
                              else symmetrify_paths(dict(nx.all_pairs_dijkstra_path(topology)))
        
-        #print ("Shortest Path Lengths: ", dict(nx.all_pairs_dijkstra_path_length(topology)))
         # Shortest paths length of the network
         self.shortest_path_len = dict(shortest_path_len) if shortest_path_len is not None \
-                                else symmetrify_paths_len(dict(nx.all_pairs_dijkstra_path_length(topology)))
+                                else symmetrify_paths_len(dict(nx.all_pairs_dijkstra_path_length(topology, weight='delay')))
+        #print ("Shortest Path Lengths: ", self.shortest_path_len)
         # Network topology
         self.topology = topology
         self.workload = workload
@@ -840,7 +846,7 @@ class NetworkController(object):
         """Detach the data collector."""
         self.collector = None
 
-    def start_session(self, timestamp, receiver, content, log, inx, count):
+    def start_session(self, timestamp, receiver, content, inx, log, count):
         """Instruct the controller to start a new session (i.e. the retrieval
         of a content).
 
@@ -860,8 +866,8 @@ class NetworkController(object):
         self.session[inx] = dict(timestamp=timestamp,
                             receiver=receiver,
                             content=content,
-                            log=log,
                             inx=inx,
+                            log=log,
                             count=count)
         if self.collector is not None and self.session[inx]['log']:
             self.collector.start_session(timestamp, receiver, content)

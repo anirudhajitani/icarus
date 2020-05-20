@@ -77,7 +77,6 @@ TOPOLOGIES = [
         'WIDE',
         'GARR',
         'TISCALI',
-        'ROCKET_FUEL',
               ]
 
 # List of caching and routing strategies
@@ -86,7 +85,6 @@ STRATEGIES = [
      'INDEX', # Index
      'LCE',  # Leave Copy Everywhere
      'NO_CACHE',  # No caching, shorest-path routing
-     'CL4M',  # Cache less for more
      'PROB_CACHE',  # ProbCache
      'LCD',  # Leave Copy Down
      'RAND_CHOICE',  # Random choice: cache in one random cache on path

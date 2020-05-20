@@ -292,7 +292,7 @@ def run(config, results, plotdir):
     if not os.path.exists(plotdir):
         os.makedirs(plotdir)
     # Parse params from settings
-    topologies = ['TREE']
+    topologies = ['ROCKET_FUEL']
     cache_sizes = settings.NETWORK_CACHE
     alphas = settings.ALPHA
     strategies = settings.STRATEGIES

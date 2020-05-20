@@ -43,10 +43,15 @@ EXPERIMENT_QUEUE = deque()
 experiment = Tree()
 
 # Set topology
+"""
 experiment['topology']['name'] = 'TREE'
 experiment['topology']['k'] = 2
 experiment['topology']['h'] = 3
 experiment['topology']['delay'] = 40
+"""
+
+experiment['topology']['name'] = 'ROCKET_FUEL'
+experiment['topology']['asn'] = 1221
 
 # Set workload
 experiment['workload'] = {

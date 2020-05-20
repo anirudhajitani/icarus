@@ -22,12 +22,14 @@ from itertools import combinations
 import collections
 from collections import namedtuple
 import numpy as np
+from pprint import pprint
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
-
+from matplotlib import pyplot as plt
+import matplotlib
 from icarus.registry import CACHE_POLICY
 from icarus.util import iround, path_links
 
@@ -754,6 +756,8 @@ class NetworkModel(object):
         self.routers = []
         #List of all files in the library
         self.library = set()
+        # Color dictionary
+        self.color_dict = dict()
         # Dictionary of link types (internal/external)
         self.link_type = nx.get_edge_attributes(topology, 'type')
         self.link_delay = fnss.get_delays(topology)
@@ -776,12 +780,16 @@ class NetworkModel(object):
                 if 'cache_size' in stack_props:
                     self.cache_size[node] = stack_props['cache_size']
                     self.routers.append(node)
+                    self.color_dict[node] = 'r'
             elif stack_name == 'source':
                 contents = stack_props['contents']
+                self.color_dict[node] = 'b'
                 self.source_node[node] = contents
                 for content in contents:
                     self.library.add(content)
                     self.content_source[content] = node
+            else:
+                    self.color_dict[node] = 'g'
         if any(c < 1 for c in self.cache_size.values()):
             logger.warn('Some content caches have size equal to 0. '
                         'I am setting them to 1 and run the experiment anyway')
@@ -810,6 +818,21 @@ class NetworkModel(object):
         self.removed_sources = {}
         self.removed_caches = {}
         self.removed_local_caches = {}
+        self.plot_graph(topology, self.color_dict)
+
+    def plot_graph(self, topology, color_dict):
+        nx.draw(topology,
+            nodelist=color_dict,
+            node_size=1000,
+            node_color=[i
+                    for i in color_dict.values()],
+            with_labels=True)
+        #nx.draw(G, cmap=plt.get_cmap('viridis'), node_color=values, with_labels=True, font_color='white')
+        #nx.draw_networkx(topology, pos=nx.drawing.layout.spring_layout(topology), cmap=color_dict)
+        #labels = nx.get_edge_attributes(topology,'delay')
+        #nx.draw_networkx_edge_labels(topology,pos=nx.drawing.layout.spring_layout(topology),edge_labels=labels)
+        plt.savefig("topo_.png")
+        print ("DIAGRAM SAVED")
 
 
 class NetworkController(object):

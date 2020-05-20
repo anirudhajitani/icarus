@@ -232,7 +232,7 @@ class RlDec(Strategy):
         # How do we compute indexes for contents already stored in the cache (what will be the distance in this case (server)?
         source = self.view.content_source(content)
         delay = self.view.shortest_path_len(source, v)
-        index = self.view.agents[agent_inx].requests.count(content) * delay 
+        index = self.view.agents[agent_inx].requests.count(content) * delay
 
         if curr_len + self.view.model.workload.contents_len[content-1] <= self.view.model.cache_size[self.view.agents[agent_inx].cache]:
             self.view.agents[agent_inx].indexes[content] = index
@@ -259,12 +259,12 @@ class RlDec(Strategy):
                 self.view.agents[agent_inx].indexes[content] = index
                 return remove_keys
 
-    def update_indexes(self, agent_inx, src, requests):
+    def update_indexes(self, agent_inx, cache, requests):
         print ("Indexes : ", self.view.agents[agent_inx].indexes)
         for k,v in self.view.agents[agent_inx].indexes.items():
             source = self.view.content_source(k)
-            print ("Source ", source, " Content ", k, " node ", src)
-            delay = self.view.shortest_path_len(source, src)
+            #print ("Source ", source, " Content ", k, " node ", src)
+            delay = self.view.shortest_path_len(source, cache)
             self.view.agents[agent_inx].indexes[k] = requests.count(k) * delay
 
     @inheritdoc(Strategy)
@@ -290,6 +290,7 @@ class RlDec(Strategy):
         min_delay = sys.maxsize
         #print ("Min Delay ", min_delay) 
         # Finding the path with the minimum delay in the network
+        serving_node = source
         for c in content_loc :
             delay = self.view.shortest_path_len(receiver, c)
             #print ("Delay : ", receiver, " , ", c, " : ", delay) 
@@ -301,6 +302,7 @@ class RlDec(Strategy):
         min_path = self.view.shortest_path(receiver, serving_node)
         lock.acquire()
         for u, v in path_links(min_path):
+            #Need to get rid of inx for indexability
             self.controller.forward_request_hop(u, v, inx)
             cont_status = self.controller.get_content(v, inx)
             if v in self.view.model.routers:
@@ -308,9 +310,9 @@ class RlDec(Strategy):
                 #print ("TYPE" , type(self.view.agents[agent_inx].state_counts))
                 self.view.agents[agent_inx].state_counts[content-1] += 1
                 self.view.agents[agent_inx].requests.append(content)
-                self.update_indexes(agent_inx, v, self.view.agents[agent_inx].requests)
                 if cont_status == True:
                     continue
+                self.update_indexes(agent_inx, v, self.view.agents[agent_inx].requests)
                 ret = self.compute_index(agent_inx, content, v, 10)
                 if ret[0] == -1:
                     self.controller.put_content(v, inx)

@@ -118,7 +118,7 @@ class Orchestrator(object):
                 workload_len = sum(1 for _ in iter(workload_obj))
                 requests = list(split_every(int(workload_len/cpus), iter(workload_obj)))
                 for req in requests:
-                    print ("REQ : ", req)
+                    #print ("REQ : ", req)
                     job_queue.append(self.pool.apply_async(run_scenario,
                             args=(self.settings, experiment,
                                   self.seq.assign(), self.n_exp, req),
@@ -296,7 +296,8 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
             # Cache budget is the cumulative number of cache entries across
             # the whole network (multiply by 5 as its average between 1 to 10 for different 
             # size contents
-            cachepl_spec['cache_budget'] = workload.n_contents * 5 * network_cache
+            #cachepl_spec['cache_budget'] = workload.n_contents * 5 * network_cache
+            cachepl_spec['cache_budget'] = workload.n_contents * network_cache
             print ("CACHE BUDGET : ", cachepl_spec)
             CACHE_PLACEMENT[cachepl_name](topology, **cachepl_spec)
 

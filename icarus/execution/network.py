@@ -189,6 +189,7 @@ class Agent(object):
         """
         self.gamma = 0.9
         self.rewards = 0
+        #Try to change this and see the behavior
         self.requests = collections.deque(maxlen=100)
         """
         if Version == 0
@@ -731,7 +732,7 @@ class NetworkModel(object):
         self.shortest_path = dict(shortest_path) if shortest_path is not None \
                              else symmetrify_paths(dict(nx.all_pairs_dijkstra_path(topology)))
        
-        print ("Shortest Path Lengths: ", dict(nx.all_pairs_dijkstra_path_length(topology)))
+        #print ("Shortest Path Lengths: ", dict(nx.all_pairs_dijkstra_path_length(topology)))
         # Shortest paths length of the network
         self.shortest_path_len = dict(shortest_path_len) if shortest_path_len is not None \
                                 else symmetrify_paths_len(dict(nx.all_pairs_dijkstra_path_length(topology)))

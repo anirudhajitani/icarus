@@ -43,7 +43,6 @@ EXPERIMENT_QUEUE = deque()
 experiment = Tree()
 
 # Set topology
-"""
 experiment['topology']['name'] = 'TREE'
 experiment['topology']['k'] = 2
 experiment['topology']['h'] = 3
@@ -51,8 +50,8 @@ experiment['topology']['delay'] = 40
 """
 
 experiment['topology']['name'] = 'ROCKET_FUEL'
-experiment['topology']['asn'] = 1221
-
+experiment['topology']['asn'] = 1239
+"""
 # Set workload
 experiment['workload'] = {
          'name':       'STATIONARY',
@@ -74,7 +73,7 @@ experiment['content_placement']['name'] = 'UNIFORM'
 experiment['cache_policy']['name'] = 'LRU'
 
 # Set caching meta-policy
-experiment['strategy']['name'] = 'NO_CACHE'
+experiment['strategy']['name'] = 'INDEX'
 
 # Description of the experiment
 experiment['desc'] = "Line topology with 10 nodes"

@@ -64,11 +64,11 @@ NETWORK_REQUEST_RATE = 12.0
 
 # Number of content requests generated to prepopulate the caches
 # These requests are not logged
-N_WARMUP_REQUESTS = 1 * 10 ** 7
+N_WARMUP_REQUESTS = 1 * 10 ** 6
 
 # Number of content requests generated after the warmup and logged
 # to generate results.
-N_MEASURED_REQUESTS = 6 * 10 ** 7
+N_MEASURED_REQUESTS = 6 * 10 ** 6
 
 # List of all implemented topologies
 # Topology implementations are located in ./icarus/scenarios/topology.py

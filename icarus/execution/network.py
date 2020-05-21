@@ -911,7 +911,6 @@ class NetworkController(object):
             lead to hit a content. It is normally used to calculate latency
             correctly in multicast cases. Default value is *True*
         """
-        print ("Forward Request Path")
         if path is None:
             path = self.model.shortest_path[s][t]
         for u, v in path_links(path):

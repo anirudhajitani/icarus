@@ -152,7 +152,7 @@ class Agent(object):
     is executing.
     """
 
-    def __init__(self, view, router, ver, gamma=0.9, lr=3e-2, window=250):
+    def __init__(self, view, router, ver, gamma=0.9, lr=3e-2, window=250, comb=0):
         """Constructor
         
         Parameters
@@ -166,29 +166,31 @@ class Agent(object):
         self.view = view
         self.cache = router
         #If all cache are equal size, can be moved to model
+        self.count = 0
         self.action_choice = []
-        self.valid_action = []
+        self.valid_action = [0, 1]
         #self.indexes = np.zeros((self.view.model.cache_size[self.cache]), dtype=float)
         self.indexes = dict()
         #All possible combinations of files (assuming minimum size of file is 1)
         print ("Cache size : ", self.view.model.cache_size[self.cache])
-        """
-        for i in range(1, self.view.model.cache_size[self.cache] + 1):
-            self.action_choice.extend(list(combinations(self.view.lib, i))) 
-        #print ("Action choices : ", self.action_choice)
-        #Filter out choice which don't add up to cache size
-        for value in self.action_choice:
-            val = list(value)
-            sum_list = 0
-            for v in val:
-                sum_list += self.view.model.workload.contents_len[v]
-            #print ("Val : ", val, " Sum : ", sum_list)
-            if sum_list <= self.view.model.cache_size[self.cache]:
-                self.valid_action.append(value)
-        print ("Content Lens : " ,self.view.model.workload.contents_len)
-        print ("Action choices after : ", self.valid_action)
-        del self.action_choice
-        """
+        if comb == 1:
+            self.valid_action = []
+            for i in range(1, self.view.model.cache_size[self.cache] + 1):
+                self.action_choice.extend(list(combinations(self.view.lib, i))) 
+            #print ("Action choices : ", self.action_choice)
+            #Filter out choice which don't add up to cache size
+            for value in self.action_choice:
+                val = list(value)
+                sum_list = 0
+                for v in val:
+                    sum_list += self.view.model.workload.contents_len[v]
+                #print ("Val : ", val, " Sum : ", sum_list)
+                if sum_list <= self.view.model.cache_size[self.cache]:
+                    self.valid_action.append(value)
+            print ("Content Lens : " ,self.view.model.workload.contents_len)
+            print ("Action choices after : ", self.valid_action)
+            del self.action_choice
+        
         self.gamma = gamma
         self.rewards = 0
         #Try to change this and see the behavior
@@ -212,7 +214,8 @@ class Agent(object):
             self.state = np.full((self.view.model.cache_size[self.cache]), 0, dtype=int)
          
         # Initialize the policy and other neural network optimizers
-        self.policy = Policy(len(self.view.model.library), len(self.valid_action))
+        #state space is lib size + 1 (for the input)
+        self.policy = Policy(len(self.view.model.library)+1, len(self.valid_action))
         #print ("POLICY", self.policy)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=3e-2)
         #print ("OPTIMIZER", self.optimizer)
@@ -239,7 +242,20 @@ class Agent(object):
         Returns the current state of the cache.
         """
         return self.state_counts
-    
+   
+    def get_state_3(self):
+        """
+        Returns the current state of the cache.
+        if i == 1 
+            Return the counts of all requests
+        if i == 2 (#TODO)
+            Return the counts of files in cache and input content
+            However there needs to be some sort of mapping or else
+            how will we come to know which count is for which request.
+        """
+        return self.state_counts
+
+
     def decode_action(self, action):
         """
         Decode the action and return a vector of binary values signifying which caches
@@ -309,14 +325,14 @@ class Agent(object):
         state = torch.from_numpy(state).float()
         #print ("STATE", state)
         probs, state_value = self.policy.forward(state)
-        #print ("PROBS, STATE_VAL", probs, state_value)
+        print ("PROBS, STATE_VAL", probs, state_value)
         # create categorical distribution over list of probabilities of actions
         m = Categorical(probs)
-        #print ("Output of NN ")
-        #print (m)
+        print ("Output of NN ")
+        print (m)
         # sample an action from the categorical distribution
         action = m.sample()
-        #print ("Sampled Action", action)
+        print ("Sampled Action", action)
         # save to action buffer
         self.policy.saved_actions.append(SavedAction(m.log_prob(action), state_value))
 
@@ -356,19 +372,21 @@ class Agent(object):
             # calulate critic (value) loss using L1 smooth loss
             value_losses.append(F.smooth_l1_loss(value, torch.tensor([R])))
         
-        #print ("Policy Loss ", policy_losses)
-        #print ("Value Loss ", value_losses)
+        print ("Policy Loss ", policy_losses)
+        print ("Value Loss ", value_losses)
         # reset gradients
         self.optimizer.zero_grad()
-        #print ("Optimizer gradient")
+        print ("Optimizer gradient")
         # sum up all the values of policy_losses and value_losses
         loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum()
         print ("Total Loss ", loss)
         # perform backprop
-        loss.backward()
-        #print ("Backprop Loss")
+        loss.backward(retain_graph=True)
+        print ("Backprop Loss")
+        #torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
+        #print ("Gradients Clip")
         self.optimizer.step()
-        #print ("Optimizer Step")
+        print ("Optimizer Step")
         # reset rewards and action buffers
         del self.policy.rewards[:]
         del self.policy.saved_actions[:]
@@ -394,6 +412,7 @@ class NetworkView(object):
         if not isinstance(model, NetworkModel):
             raise ValueError('The model argument must be an instance of '
                              'NetworkModel')
+        #TODO - objects allocate only based on strategy (no need to assign data if not used
         self.model = model
         self.count = 0
         self.common_rewards = 0
@@ -408,11 +427,17 @@ class NetworkView(object):
             nnp['gamma'] = 0.9
         if 'window' not in nnp:
             nnp['window'] = 250
+        if 'comb' not in nnp:
+            nnp['comb'] = 0
+        if 'update_freq' not in nnp:
+            nnp['update_freq'] = 100
         #self.status = [False] * cpus
         #self.ind_count = [0] * cpus
+        self.update_freq = nnp['update_freq']
+        self.window = nnp['window']
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
-            self.agents.append(Agent(self, r, 0, nnp['gamma'], nnp['lr'], nnp['window']))
+            self.agents.append(Agent(self, r, 0, nnp['gamma'], nnp['lr'], nnp['window'], nnp['comb']))
         self.agents_per_thread = int(len(self.agents)/cpus)
         self.extra_agents = len(self.agents) % cpus
         #print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)

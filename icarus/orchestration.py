@@ -340,10 +340,13 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
         collectors = {m: {} for m in metrics}
         
         nnp = dict()
+        if strategy['name'] == 'RL_DEC_1':
+            nnp['comb'] = 1
         if 'nnp' in tree:
             nnp['window'] = tree['nnp']['window']
             nnp['lr'] = tree['nnp']['lr']
             nnp['gamma'] = tree['nnp']['gamma']
+            nnp['update_freq'] = tree['nnp']['update_freq']
 
         logger.info('Experiment %d/%d | Start simulation', curr_exp, n_exp)
         results = exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp)

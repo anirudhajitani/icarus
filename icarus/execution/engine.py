@@ -7,7 +7,7 @@ and providing them to a strategy instance.
 """
 from icarus.execution import NetworkModel, NetworkView, NetworkController, CollectorProxy
 from icarus.registry import DATA_COLLECTOR, STRATEGY
-
+from pprint import pprint
 from itertools import islice, takewhile, repeat
 import multiprocessing as mp
 import threading as th
@@ -63,6 +63,7 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     """
     cpus = mp.cpu_count()
     print ("CPUS = ", cpus)
+    #pprint(vars(topology))
     model = NetworkModel(topology, workload, cache_policy, **netconf)
     view = NetworkView(model, cpus, nnp)
     controller = NetworkController(model, cpus)

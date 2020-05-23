@@ -218,7 +218,7 @@ class Index(Strategy):
             if v in self.view.model.routers:
                 agent_inx = self.view.model.routers.index(v)
                 #print ("TYPE" , type(self.view.agents[agent_inx].state_counts))
-                self.view.agents[agent_inx].state_counts[content-1] += 1
+                #self.view.agents[agent_inx].state_counts[content-1] += 1
                 self.view.agents[agent_inx].requests.append(content)
                 if cont_status == True:
                     continue

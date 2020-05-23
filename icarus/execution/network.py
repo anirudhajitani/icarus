@@ -153,7 +153,7 @@ class Agent(object):
     is executing.
     """
 
-    def __init__(self, view, router, ver, gamma=0.9, lr=3e-2, window=250, comb=0):
+    def __init__(self, view, router, ver, strategy_name, gamma=0.9, lr=3e-2, window=250):
         """Constructor
         
         Parameters
@@ -168,13 +168,18 @@ class Agent(object):
         self.cache = router
         #If all cache are equal size, can be moved to model
         self.count = 0
-        self.action_choice = []
+        self.gamma = gamma
+        self.rewards = 0
         self.valid_action = [0, 1]
         #self.indexes = np.zeros((self.view.model.cache_size[self.cache]), dtype=float)
-        self.indexes = dict()
+        if strategy_name in ['INDEX', 'INDEX_DIST']:
+            self.indexes = dict()
+        if strategy_name in ['INDEX', 'INDEX_DIST', 'RL_DEC_2']:
+            self.requests = collections.deque(maxlen=window)
         #All possible combinations of files (assuming minimum size of file is 1)
         print ("Cache size : ", self.view.model.cache_size[self.cache])
-        if comb == 1:
+        if strategy_name in ['RL_DEC_1']:
+            self.action_choice = []
             self.valid_action = []
             for i in range(1, self.view.model.cache_size[self.cache] + 1):
                 self.action_choice.extend(list(combinations(self.view.lib, i))) 
@@ -192,10 +197,7 @@ class Agent(object):
             print ("Action choices after : ", self.valid_action)
             del self.action_choice
         
-        self.gamma = gamma
-        self.rewards = 0
         #Try to change this and see the behavior
-        self.requests = collections.deque(maxlen=window)
         """
         if Version == 0
         The state comprises of all the elements currently cached in the router.
@@ -208,25 +210,36 @@ class Agent(object):
         self.state_ver = ver
         #self.action_space = combinations(
         if self.state_ver == 0:
+            if strategy_name in ['INDEX_DIST', 'RL_DEC_1', 'RL_DEC_2']:
+                self.state_counts = np.full((len(self.view.model.library)), 0, dtype=int) 
             self.state = np.full((len(self.view.model.library)), 0, dtype=int) 
-            self.state_counts = np.full((len(self.view.model.library)), 0, dtype=int) 
-            self.prob = np.full((len(self.view.model.library)), 1, dtype=int) 
-            self.prob = self.prob/np.sum(self.prob)
-            # Prior distribution (dirchlet)
-            self.alpha = np.array(range(1, len(self.view.model.library)+1))
-            self.alpha = self.alpha[::-1]
+            if strategy_name in ['INDEX_DIST']:
+                self.prob = np.full((len(self.view.model.library)), 1, dtype=int) 
+                self.prob = self.prob/np.sum(self.prob)
+                # Prior distribution (dirchlet)
+                self.alpha = np.array(range(1, len(self.view.model.library)+1))
+                self.alpha = self.alpha[::-1]
         else:
             #TODO - if needed, we update the statistics
             self.state = np.full((self.view.model.cache_size[self.cache]), 0, dtype=int)
          
         # Initialize the policy and other neural network optimizers
         #state space is lib size + 1 (for the input)
-        self.policy = Policy(len(self.view.model.library)+1, len(self.valid_action))
-        #print ("POLICY", self.policy)
-        self.optimizer = optim.Adam(self.policy.parameters(), lr=3e-2)
-        #print ("OPTIMIZER", self.optimizer)
-        self.eps = np.finfo(np.float32).eps.item()
-        #print ("EPS", self.eps)
+
+        if strategy_name in ['RL_DEC_1']:
+            self.policy = Policy(len(self.view.model.library), len(self.valid_action))
+            #print ("POLICY", self.policy)
+            self.optimizer = optim.Adam(self.policy.parameters(), lr=3e-2)
+            #print ("OPTIMIZER", self.optimizer)
+            self.eps = np.finfo(np.float32).eps.item()
+            #print ("EPS", self.eps)
+        if strategy_name in ['RL_DEC_2']:
+            self.policy = Policy(len(self.view.model.library)+1, len(self.valid_action))
+            #print ("POLICY", self.policy)
+            self.optimizer = optim.Adam(self.policy.parameters(), lr=3e-2)
+            #print ("OPTIMIZER", self.optimizer)
+            self.eps = np.finfo(np.float32).eps.item()
+            #print ("EPS", self.eps)
 
     def get_state(self):
         """
@@ -407,7 +420,7 @@ class NetworkView(object):
     characteristics of links and currently cached objects in nodes.
     """
 
-    def __init__(self, model, cpus, nnp):
+    def __init__(self, model, cpus, nnp, strategy_name):
         """Constructor
 
         Parameters
@@ -433,8 +446,6 @@ class NetworkView(object):
             nnp['gamma'] = 0.9
         if 'window' not in nnp:
             nnp['window'] = 250
-        if 'comb' not in nnp:
-            nnp['comb'] = 0
         if 'update_freq' not in nnp:
             nnp['update_freq'] = 100
         #self.status = [False] * cpus
@@ -443,10 +454,11 @@ class NetworkView(object):
         self.window = nnp['window']
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
-            self.agents.append(Agent(self, r, 0, nnp['gamma'], nnp['lr'], nnp['window'], nnp['comb']))
-        self.agents_per_thread = int(len(self.agents)/cpus)
-        self.extra_agents = len(self.agents) % cpus
-        #print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
+            self.agents.append(Agent(self, r, 0, strategy_name, nnp['gamma'], nnp['lr'], nnp['window']))
+        if strategy_name == 'RL_DEC_1':
+            self.agents_per_thread = int(len(self.agents)/cpus)
+            self.extra_agents = len(self.agents) % cpus
+            #print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
     """
     def env_step():
 

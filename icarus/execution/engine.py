@@ -64,8 +64,9 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     cpus = mp.cpu_count()
     print ("CPUS = ", cpus)
     #pprint(vars(topology))
+    strategy_name = strategy['name']
     model = NetworkModel(topology, workload, cache_policy, **netconf)
-    view = NetworkView(model, cpus, nnp)
+    view = NetworkView(model, cpus, nnp, strategy_name)
     controller = NetworkController(model, cpus)
     print ("Network Done")
     collectors_inst = [DATA_COLLECTOR[name](view, **params)
@@ -73,7 +74,6 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     collector = CollectorProxy(view, collectors_inst)
     controller.attach_collector(collector)
     print ("Collector done")
-    strategy_name = strategy['name']
     strategy_args = {k: v for k, v in strategy.items() if k != 'name'}
     strategy_inst = STRATEGY[strategy_name](view, controller, **strategy_args)
     print ("Strategy done")

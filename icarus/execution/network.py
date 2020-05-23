@@ -46,8 +46,8 @@ logger = logging.getLogger('orchestration')
 #Uncomment and provide manual seed if needed
 #torch.manual_seed()
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 SavedAction = namedtuple('SavedAction', ['log_prob', 'value'])
-
 
 def symmetrify_paths(shortest_paths):
     """Make paths symmetric
@@ -122,6 +122,7 @@ class Policy(nn.Module):
         # action and reward buffer
         self.saved_actions = []
         self.rewards = []
+        self.to(device)
 
     def forward(self, x):
         """
@@ -327,7 +328,7 @@ class Agent(object):
     """
 
     def select_actions(self, state):
-        state = torch.from_numpy(state).float()
+        state = torch.from_numpy(state).float().to(device)
         #print ("STATE", state)
         probs, state_value = self.policy.forward(state)
         print ("PROBS, STATE_VAL", probs, state_value)
@@ -363,7 +364,7 @@ class Agent(object):
             #print ("Reward : ", r)
             R = r + self.gamma * R
             returns.insert(0, R)
-        returns = torch.tensor(returns)
+        returns = torch.tensor(returns, device=device)
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
         #print ("Returns ", returns)
 
@@ -375,7 +376,7 @@ class Agent(object):
             policy_losses.append(-log_prob * advantage)
 
             # calulate critic (value) loss using L1 smooth loss
-            value_losses.append(F.smooth_l1_loss(value, torch.tensor([R])))
+            value_losses.append(F.smooth_l1_loss(value, torch.tensor([R], device=device)))
         
         print ("Policy Loss ", policy_losses)
         print ("Value Loss ", value_losses)

@@ -209,6 +209,11 @@ class Agent(object):
         if self.state_ver == 0:
             self.state = np.full((len(self.view.model.library)), 0, dtype=int) 
             self.state_counts = np.full((len(self.view.model.library)), 0, dtype=int) 
+            self.prob = np.full((len(self.view.model.library)), 1, dtype=int) 
+            self.prob = self.prob/np.sum(self.prob)
+            # Prior distribution (dirchlet)
+            self.alpha = np.array(range(1, len(self.view.model.library)+1))
+            self.alpha = self.alpha[::-1]
         else:
             #TODO - if needed, we update the statistics
             self.state = np.full((self.view.model.cache_size[self.cache]), 0, dtype=int)

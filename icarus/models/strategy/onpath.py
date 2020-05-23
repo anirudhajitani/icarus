@@ -15,6 +15,7 @@ __all__ = [
        'Partition',
        'Edge',
        'Index',
+       'IndexDist',
        'RlDec1',
        'RlDec2',
        'LeaveCopyEverywhere',
@@ -223,6 +224,130 @@ class Index(Strategy):
                     continue
                 self.update_indexes(agent_inx, v, self.view.agents[agent_inx].requests)
                 ret = self.compute_index(agent_inx, content, v, 10)
+                if ret[0] == -1:
+                    self.controller.put_content(v, inx)
+                elif ret[0] != -2:
+                    for r in ret:
+                        self.controller.remove_content(v, inx, r)
+                    self.controller.put_content(v, inx)
+        # update the rewards for the episode
+        self.view.common_rewards -= min_delay
+        lock.release()
+        # Return content
+        #print ("Serving Node", serving_node)
+        path = list(reversed(self.view.shortest_path(receiver, serving_node)))
+        lock.acquire()
+        #print ("LOCK ACQUIRED ", inx, count)
+        self.controller.forward_content_path(serving_node, receiver, size, inx, path)
+        self.controller.end_session(inx)
+        lock.release()
+        #print ("Session End")
+
+@register_strategy('INDEX_DIST')
+class IndexDist(Strategy):
+    """Indexability caching strategy.
+    Estimate parameter of Distribution
+    In this strategy, we aim to find an optimal policy where the caches
+    look at the current state of the network and try decide if it needs
+    to cache certain files or not
+    """
+
+    @inheritdoc(Strategy)
+    def __init__(self, view, controller):
+        super(IndexDist, self).__init__(view, controller)
+   
+    def compute_index(self, agent_inx, content, v, threshold):
+        curr_len = 0
+        #print ("AGENT, Indexes Before: ", agent_inx, self.view.agents[agent_inx].indexes)
+        for k, val in self.view.agents[agent_inx].indexes.items():
+            curr_len += self.view.model.workload.contents_len[k-1]
+        # compute index of content
+        # How do we compute indexes for contents already stored in the cache (what will be the distance in this case (server)?
+        source = self.view.content_source(content)
+        delay = self.view.shortest_path_len(source, v)
+        index = self.view.agents[agent_inx].prob[content-1] * delay
+        #print ("AGENT, NEW INDEX, DELAY", agent_inx, index, delay) 
+        if curr_len + self.view.model.workload.contents_len[content-1] <= self.view.model.cache_size[self.view.agents[agent_inx].cache]:
+            self.view.agents[agent_inx].indexes[content] = index
+            return [-1]
+        else:
+            remove_len = 0
+            remove_inx = 0
+            remove_keys = []
+            indexes = self.view.agents[agent_inx].indexes.copy()
+            while curr_len - remove_len + self.view.model.workload.contents_len[content-1] > self.view.model.cache_size[self.view.agents[agent_inx].cache]:
+                key_min = min(indexes.keys(), key=(lambda k: indexes[k]))
+                remove_len += self.view.model.workload.contents_len[key_min-1]
+                remove_inx += indexes[key_min]
+                if index > remove_inx + threshold:
+                    del indexes[key_min]
+                    remove_keys.append(key_min)
+            if len(remove_keys) == 0:
+                return [-2]
+            else:
+                #print ("Remove Keys : ", remove_keys)
+                #print ("AGENT, Indexes After: ", agent_inx, self.view.agents[agent_inx].indexes)
+                for r in remove_keys:
+                    del self.view.agents[agent_inx].indexes[r]
+                self.view.agents[agent_inx].indexes[content] = index
+                return remove_keys
+
+    def update_indexes(self, agent_inx, cache):
+        #print ("Indexes : ", self.view.agents[agent_inx].indexes)
+        for k,v in self.view.agents[agent_inx].indexes.items():
+            source = self.view.content_source(k)
+            #print ("Source ", source, " Content ", k, " node ", src)
+            delay = self.view.shortest_path_len(source, cache)
+            self.view.agents[agent_inx].indexes[k] = self.view.agents[agent_inx].prob[k-1] * delay
+
+    @inheritdoc(Strategy)
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
+        # get all required data
+        #print ("PROCESS EVENT", time, receiver, content)
+        #print ("LOCK : ", lock)
+        #print ("ID", id(self), id(self.view), id(self.controller))
+        source = self.view.content_source(content)
+        path = self.view.shortest_path(receiver, source)
+        #self.view.ind_count[inx] = count 
+        # Route requests to original source and queries caches on the path
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
+        self.view.count += 1
+        lock.release()
+        # Get location of all nodes that has the content stored
+        content_loc = self.view.content_locations(content)
+        min_delay = sys.maxsize
+        #print ("Min Delay ", min_delay) 
+        # Finding the path with the minimum delay in the network
+        serving_node = source
+        for c in content_loc :
+            delay = self.view.shortest_path_len(receiver, c)
+            #print ("Delay : ", receiver, " , ", c, " : ", delay) 
+            if delay < min_delay:
+                min_delay = delay
+                serving_node = c
+
+        # fetching the data 
+        min_path = self.view.shortest_path(receiver, serving_node)
+        lock.acquire()
+        for u, v in path_links(min_path):
+            #Need to get rid of inx for indexability
+            self.controller.forward_request_hop(u, v, inx)
+            cont_status = self.controller.get_content(v, inx)
+            if v in self.view.model.routers:
+                agent_inx = self.view.model.routers.index(v)
+                #print ("TYPE" , type(self.view.agents[agent_inx].state_counts))
+                #Updating prior and frequency
+                self.view.agents[agent_inx].state_counts[content-1] += 1
+                self.view.agents[agent_inx].alpha[content-1] += 1
+                if cont_status == True:
+                    continue
+                #Updating probability of multinomial distribution
+                self.view.agents[agent_inx].prob = (self.view.agents[agent_inx].state_counts + self.view.agents[agent_inx].alpha) \
+                                                    / (np.sum(self.view.agents[agent_inx].state_counts) + np.sum(self.view.agents[agent_inx].alpha))
+                self.update_indexes(agent_inx, v)
+                #print ("PROBABILITY", agent_inx, self.view.agents[agent_inx].prob)
+                ret = self.compute_index(agent_inx, content, v, 1)
                 if ret[0] == -1:
                     self.controller.put_content(v, inx)
                 elif ret[0] != -2:

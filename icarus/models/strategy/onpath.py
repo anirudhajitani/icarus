@@ -17,7 +17,8 @@ __all__ = [
        'Index',
        'IndexDist',
        'RlDec1',
-       'RlDec2',
+       'RlDec2F',
+       'RlDec2D',
        'LeaveCopyEverywhere',
        'LeaveCopyDown',
        'ProbCache',
@@ -400,7 +401,7 @@ class RlDec1(Strategy):
         #print ("ENV STEP")
         start, end = self.get_agent_indexes(inx)
         for i in range(start,end):
-            curr_state = self.view.agents[i].get_state_2()
+            curr_state = self.view.agents[i].get_state()
             print ("STATE for ", i, " = ", curr_state)
             action = self.view.agents[i].select_actions(curr_state)
             action = self.view.agents[i].decode_action(action)
@@ -546,8 +547,8 @@ class RlDec1(Strategy):
         lock.release()
         #print ("Session End")
         
-@register_strategy('RL_DEC_2')
-class RlDec2(Strategy):
+@register_strategy('RL_DEC_2F')
+class RlDec2F(Strategy):
     """Reinforcement Learning Decentralized caching strategy.
 
     In this strategy, we aim to find an optimal policy where the caches
@@ -557,7 +558,7 @@ class RlDec2(Strategy):
 
     @inheritdoc(Strategy)
     def __init__(self, view, controller):
-        super(RlDec2, self).__init__(view, controller)
+        super(RlDec2F, self).__init__(view, controller)
     
     def env_step(self, i, size, lock, delay):
         """
@@ -568,7 +569,7 @@ class RlDec2(Strategy):
         3. perform the actions
         """
         #print ("ENV STEP")
-        curr_state = self.view.agents[i].get_state_3()
+        curr_state = self.view.agents[i].get_state()
         curr_state = np.append(curr_state, delay)
         print ("STATE for ", i, " = ", curr_state)
         action = self.view.agents[i].select_actions(curr_state)
@@ -685,6 +686,149 @@ class RlDec2(Strategy):
         lock.release()
         #print ("Session End")
         
+@register_strategy('RL_DEC_2D')
+class RlDec2D(Strategy):
+    """Reinforcement Learning Decentralized caching strategy.
+
+    In this strategy, we aim to find an optimal policy where the caches
+    look at the current state of the network and try decide if it needs
+    to cache certain files or not
+    """
+
+    @inheritdoc(Strategy)
+    def __init__(self, view, controller):
+        super(RlDec2D, self).__init__(view, controller)
+    
+    def env_step(self, i, size, lock, delay):
+        """
+
+        A step of the environment includes the following for all agents:
+        1. get the current state of each agent
+        2. select actions
+        3. perform the actions
+        """
+        #print ("ENV STEP")
+        curr_state = self.view.agents[i].get_state()
+        curr_state = np.append(curr_state, delay)
+        print ("STATE for ", i, " = ", curr_state)
+        action = self.view.agents[i].select_actions(curr_state)
+        #For this case no need for decode action 0 or 1 (no cache, cache)
+        #action = self.view.agents[i].decode_action(action)
+        #Rewards will be given later once calculation is done
+        #self.view.agents[i].rewards -= self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
+        return action
+
+    def update_gradients(self, i):
+        """
+
+        Get the rewards from the environment
+        Append the rewards to the rewards data structure accessed by the policy class
+        Perform actor-critic update
+        """
+        self.view.agents[i].update()
+
+
+    @inheritdoc(Strategy)
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
+        # get all required data
+        #print ("PROCESS EVENT", time, receiver, content)
+        #print ("LOCK : ", lock)
+        #print ("ID", id(self), id(self.view), id(self.controller))
+        source = self.view.content_source(content)
+        path = self.view.shortest_path(receiver, source)
+        #self.view.ind_count[inx] = count 
+        # Route requests to original source and queries caches on the path
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
+        self.view.count += 1
+        lock.release()
+        #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
+        #if self.view.count % 50 == 0:
+        #if count % self.view.update_freq == 0:
+        #    self.env_step(size, inx, lock) 
+        # Get location of all nodes that has the content stored
+        content_loc = self.view.content_locations(content)
+        min_delay = sys.maxsize
+        #print ("Min Delay ", min_delay) 
+        # Finding the path with the minimum delay in the network
+        serving_node = source
+        for c in content_loc :
+            delay = self.view.shortest_path_len(receiver, c)
+            #print ("Delay : ", receiver, " , ", c, " : ", delay) 
+            if delay < min_delay:
+                min_delay = delay
+                serving_node = c
+
+        # fetching the data 
+        min_path = self.view.shortest_path(receiver, serving_node)
+        lock.acquire()
+        for u, v in path_links(min_path):
+            #Need to get rid of inx for indexability
+            self.controller.forward_request_hop(u, v, inx)
+            cont_status = self.controller.get_content(v, inx)
+            if v in self.view.model.routers:
+                agent_inx = self.view.model.routers.index(v)
+                #print ("TYPE" , type(self.view.agents[agent_inx].state_counts))
+                #Rather than calculating state counts over moving window everytime do it here in online manner
+                if len(self.view.agents[agent_inx].requests) == self.view.window:
+                    rem = self.view.agents[agent_inx].requests.popleft()
+                    self.view.agents[agent_inx].state_counts[rem-1] -= 1
+                #get state_2 (need to reset after window size)
+                self.view.agents[agent_inx].state_counts[content-1] += 1
+                self.view.agents[agent_inx].count += 1
+                self.view.agents[agent_inx].requests.append(content)
+                self.view.agents[agent_inx].alpha[content-1] += 1
+                
+                if cont_status == True:
+                    continue
+                self.view.agents[agent_inx].prob = (self.view.agents[agent_inx].state_counts + self.view.agents[agent_inx].alpha) \
+                                                     / (np.sum(self.view.agents[agent_inx].state_counts) + np.sum(self.view.agents[agent_inx].alpha))
+                action = self.env_step(agent_inx, size, lock, self.view.shortest_path_len(receiver, v))
+                print ("ACTION TO PERFORM", agent_inx, action)
+                if action == 1:
+                    #TODO run another policy network to find out what content to remove
+                    #By default it will use the LRU policy
+                    #rewards = add frequency count of cached content and subtract of evicted content + reward is delay between this cache
+                    #and receiver
+                    evicted = self.controller.put_content(v, inx)
+                    if evicted is not None:
+                        self.view.agents[agent_inx].rewards -= self.view.agents[agent_inx].requests.count(evicted)
+                        print ("EVICTED ", evicted, " COUNT ", self.view.agents[agent_inx].requests.count(evicted))
+                    self.view.agents[agent_inx].rewards += self.view.agents[agent_inx].requests.count(content)
+                    self.view.agents[agent_inx].rewards -= self.view.shortest_path_len(receiver, v) 
+                else:
+                    #rewards = delay from content loc to receiver
+                    self.view.agents[agent_inx].rewards -= min_delay
+                #TODO - find how to give rewards
+                self.view.agents[agent_inx].policy.rewards.append(self.view.agents[agent_inx].rewards)
+                self.view.agents[agent_inx].rewards = 0
+                if self.view.agents[agent_inx].count % 100 == 0:
+                    self.update_gradients(agent_inx)
+        # update the rewards for the episode
+        #self.view.common_rewards -= min_delay
+        lock.release()
+        
+        """
+        if count % self.view.update_freq == 0:
+            self.view.agents[i].rewards -= self.view.common_rewards
+            self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
+            self.view.agents[i].rewards *= 0
+            #print ("TYPE 2" , type(self.view.agents[agent_inx].state_counts))
+            self.view.common_rewards *= 0
+        if count % (self.view.update_freq * 5) == 0:
+            self.view.agents[i].state_counts *= 0
+            self.update_gradients(inx)
+       """ 
+        # Return content
+        #print ("Serving Node", serving_node)
+        path = list(reversed(self.view.shortest_path(receiver, serving_node)))
+        lock.acquire()
+        #print ("LOCK ACQUIRED ", inx, count)
+        self.controller.forward_content_path(serving_node, receiver, size, inx, path)
+        self.controller.end_session(inx)
+        lock.release()
+        #print ("Session End")
+
 @register_strategy('LCE')
 class LeaveCopyEverywhere(Strategy):
     """Leave Copy Everywhere (LCE) strategy.

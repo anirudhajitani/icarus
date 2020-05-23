@@ -153,7 +153,7 @@ class Agent(object):
     is executing.
     """
 
-    def __init__(self, view, router, ver, strategy_name, gamma=0.9, lr=3e-2, window=250):
+    def __init__(self, view, router, ver, gamma=0.9, lr=3e-2, window=250):
         """Constructor
         
         Parameters
@@ -172,13 +172,13 @@ class Agent(object):
         self.rewards = 0
         self.valid_action = [0, 1]
         #self.indexes = np.zeros((self.view.model.cache_size[self.cache]), dtype=float)
-        if strategy_name in ['INDEX', 'INDEX_DIST']:
+        if self.view.strategy_name in ['INDEX', 'INDEX_DIST']:
             self.indexes = dict()
-        if strategy_name in ['INDEX', 'INDEX_DIST', 'RL_DEC_2']:
+        if self.view.strategy_name in ['INDEX', 'INDEX_DIST', 'RL_DEC_2F', 'RL_DEC_2D']:
             self.requests = collections.deque(maxlen=window)
         #All possible combinations of files (assuming minimum size of file is 1)
         print ("Cache size : ", self.view.model.cache_size[self.cache])
-        if strategy_name in ['RL_DEC_1']:
+        if self.view.strategy_name in ['RL_DEC_1']:
             self.action_choice = []
             self.valid_action = []
             for i in range(1, self.view.model.cache_size[self.cache] + 1):
@@ -210,10 +210,10 @@ class Agent(object):
         self.state_ver = ver
         #self.action_space = combinations(
         if self.state_ver == 0:
-            if strategy_name in ['INDEX_DIST', 'RL_DEC_1', 'RL_DEC_2']:
+            if self.view.strategy_name in ['INDEX_DIST', 'RL_DEC_1', 'RL_DEC_2F', 'RL_DEC_2D']:
                 self.state_counts = np.full((len(self.view.model.library)), 0, dtype=int) 
             self.state = np.full((len(self.view.model.library)), 0, dtype=int) 
-            if strategy_name in ['INDEX_DIST']:
+            if self.view.strategy_name in ['INDEX_DIST', 'RL_DEC_2D']:
                 self.prob = np.full((len(self.view.model.library)), 1, dtype=int) 
                 self.prob = self.prob/np.sum(self.prob)
                 # Prior distribution (dirchlet)
@@ -226,14 +226,14 @@ class Agent(object):
         # Initialize the policy and other neural network optimizers
         #state space is lib size + 1 (for the input)
 
-        if strategy_name in ['RL_DEC_1']:
+        if self.view.strategy_name in ['RL_DEC_1']:
             self.policy = Policy(len(self.view.model.library), len(self.valid_action))
             #print ("POLICY", self.policy)
             self.optimizer = optim.Adam(self.policy.parameters(), lr=3e-2)
             #print ("OPTIMIZER", self.optimizer)
             self.eps = np.finfo(np.float32).eps.item()
             #print ("EPS", self.eps)
-        if strategy_name in ['RL_DEC_2']:
+        if self.view.strategy_name in ['RL_DEC_2F', 'RL_DEC_2D']:
             self.policy = Policy(len(self.view.model.library)+1, len(self.valid_action))
             #print ("POLICY", self.policy)
             self.optimizer = optim.Adam(self.policy.parameters(), lr=3e-2)
@@ -245,6 +245,10 @@ class Agent(object):
         """
         Returns the current state of the cache.
         """
+        if self.view.strategy_name in ['INDEX', 'INDEX_DIST', 'RL_DEC_1', 'RL_DEC_2F']:
+            return self.state_counts
+        if self.view.strategy_name in ['RL_DEC_2D']:
+            return self.prob
         contents = self.view.cache_dump(self.cache)
         if self.state_ver == 0:
             for c in contents :
@@ -256,25 +260,6 @@ class Agent(object):
         #print (self.state)
         return self.state
     
-    def get_state_2(self):
-        """
-        Returns the current state of the cache.
-        """
-        return self.state_counts
-   
-    def get_state_3(self):
-        """
-        Returns the current state of the cache.
-        if i == 1 
-            Return the counts of all requests
-        if i == 2 (#TODO)
-            Return the counts of files in cache and input content
-            However there needs to be some sort of mapping or else
-            how will we come to know which count is for which request.
-        """
-        return self.state_counts
-
-
     def decode_action(self, action):
         """
         Decode the action and return a vector of binary values signifying which caches
@@ -288,57 +273,6 @@ class Agent(object):
             action_decoded[f] = 1
         print ("Action decoded", action_decoded)
         return action_decoded
-
-    """
-    def perform_action(action):
-        Decode the actions provided by the policy network
-        Cache files according to the action selected
-        
-        #TODO - One of the scenarios that can happen that can add delay:
-        Files needs to be cached but removed based on LRU, so one file can 
-        be deleted and then fetched again in the same iteration.
-        SO we create a list of files to be fetched and list of files
-        to be deleted, first delete the files and then get the rest to cache.
-        
-        add_contents = []
-        remove_contents = []
-        existing_contents = self.view.cache_dump(self.cache)
-        for a in range(action.shape(0)):
-            if action[a] == 1:
-                #here get_content called without content so cache hit/miss can be computed,
-                if self.controller.get_content(self.cache, a+1) is False:
-                    add_contents.append(a+1)
-            else:
-                if a+1 in existing_contents:
-                    remove_contents.append(a+1)
-        
-        print ("To be added ", add_contents)
-        print ("To be removed ", remove_contents)
-        
-        for rc in remove_contents:
-            self.controller.remove_content(self.cache, rc)             
-        for ac in add_contents:
-            # Get location of all nodes that has the content stored
-            content_loc = self.view.content_locations(content)
-            min_delay = sys.maxint
-            # Finding the path with the minimum delay in the network
-            for c in content_loc :
-                delay = self.view.shortest_path_len(self.cache, c)
-                if delay < min_delay:
-                    min_delay = delay
-                    serving_node = c
-
-            # fetching the data
-            min_path = self.view.shortest_path(self.cache, c)
-            for u, v in path_links(min_path):
-                self.controller.forward_request_hop(u, v)
-            
-            # update the rewards for the episode
-            self.view.rewards -= min_delay
-            path = list(reversed(self.view.shortest_path(self.cache, serving_node)))
-            self.controller.forward_content_path(serving_node, self.cache, path)
-            self.controller.put_content(self.cache, ac)
-    """
 
     def select_actions(self, state):
         state = torch.from_numpy(state).float().to(device)
@@ -435,6 +369,7 @@ class NetworkView(object):
         self.model = model
         self.count = 0
         self.common_rewards = 0
+        self.strategy_name = strategy_name
         #Different because other library is a set, here we want to preserve ordering
         self.lib = [item for item in range(0, len(self.model.library))]
         #Contains the agents as objects of Class Agent
@@ -454,7 +389,7 @@ class NetworkView(object):
         self.window = nnp['window']
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
-            self.agents.append(Agent(self, r, 0, strategy_name, nnp['gamma'], nnp['lr'], nnp['window']))
+            self.agents.append(Agent(self, r, 0,  nnp['gamma'], nnp['lr'], nnp['window']))
         if strategy_name == 'RL_DEC_1':
             self.agents_per_thread = int(len(self.agents)/cpus)
             self.extra_agents = len(self.agents) % cpus

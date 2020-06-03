@@ -467,7 +467,7 @@ class RlDec1(Strategy):
             min_path = self.view.shortest_path(cache, serving_node)
             for u, v in path_links(min_path):
                 self.controller.forward_request_hop(u, v, inx)
-            rew += delay
+            rew += min_delay
             # update the rewards for the episode
             #print ("DELAY IN FETCHING", min_delay)
             path = list(reversed(self.view.shortest_path(cache, serving_node)))

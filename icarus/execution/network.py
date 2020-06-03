@@ -45,7 +45,7 @@ logger = logging.getLogger('orchestration')
 
 #Uncomment and provide manual seed if needed
 #torch.manual_seed()
-
+torch.autograd.set_detect_anomaly(True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 SavedAction = namedtuple('SavedAction', ['log_prob', 'value'])
 SavedAction2 = namedtuple('SavedAction2', ['log_prob', 'value'])
@@ -281,13 +281,13 @@ class Agent(object):
         Decode the action and return a vector of binary values signifying which caches
         should cache what content
         """
-        files_to_cache = self.valid_action[action]
+        files_to_cache = self.valid_action[action[0]]
         files_to_cache = list(files_to_cache)
         #print ("Files to cache", files_to_cache)
         action_decoded = np.full((len(self.view.model.library)), 0, dtype=int)
         for f in files_to_cache:
             action_decoded[f] = 1
-        print ("Action decoded", action_decoded)
+        #print ("Action decoded", action_decoded)
         return action_decoded
 
     def select_actions(self, state):
@@ -307,7 +307,7 @@ class Agent(object):
         cache_cont = self.view.cache_dump(self.cache)
         #print ("CACHE DUMP", cache_cont, len(cache_cont))
         # Only if cache dump is equal to max cache size we need to find what obj to evict
-        if action.item() == 1 and len(cache_cont) == self.cache_size:
+        if action.item() == 1 and len(cache_cont) == self.cache_size and self.view.strategy_name in ['RL_DEC_2D', 'RL_DEC_2F']:
             state2 = self.get_cache_dump()
             action2 = self.select_actions_2(state2)
             #print ("Return evicted content", cache_cont[action2])
@@ -339,7 +339,7 @@ class Agent(object):
 
         Training code. Calculates actor and critic loss and performn backpropogation.
         """
-        #print ("UPDATE FN")
+        print ("UPDATE FN")
         R = 0
         saved_actions = self.policy.saved_actions
         policy_losses = [] # list to save actor (policy) loss
@@ -377,6 +377,7 @@ class Agent(object):
         #print ("Total Loss ", loss)
         # perform backprop
         loss.backward(retain_graph=True)
+        #loss.backward()
         #print ("Backprop Loss")
         #torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
         #print ("Gradients Clip")

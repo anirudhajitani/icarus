@@ -13,14 +13,14 @@ LOG_LEVEL = 'INFO'
 # If True, executes simulations in parallel using multiple processes
 # to take advantage of multicore CPUs
 PARALLEL_EXECUTION = False
-PARALLEL_EXECUTION_RUNS = True
+PARALLEL_EXECUTION_RUNS = False
 
 # Number of processes used to run simulations in parallel.
 # This option is ignored if PARALLEL_EXECUTION = False
 N_PROCESSES = cpu_count()
 
 # Number of times each experiment is replicated
-N_REPLICATIONS = 2
+N_REPLICATIONS = 1
 
 # Granularity of caching.
 # Currently, only OBJECT is supported
@@ -77,7 +77,7 @@ experiment['content_placement']['name'] = 'UNIFORM'
 experiment['cache_policy']['name'] = 'IN_CACHE_LFU'
 
 # Set caching meta-policy
-experiment['strategy']['name'] = 'LCE'
+experiment['strategy']['name'] = 'RL_DEC_1'
 
 # Description of the experiment
 experiment['desc'] = "Line topology with 10 nodes"

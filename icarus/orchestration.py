@@ -13,6 +13,7 @@ import sys
 import signal
 import traceback
 
+from icarus.registry import RESULTS_WRITER
 from icarus.execution import exec_experiment
 from icarus.registry import TOPOLOGY_FACTORY, CACHE_PLACEMENT, CONTENT_PLACEMENT, \
                             CACHE_POLICY, WORKLOAD, DATA_COLLECTOR, STRATEGY
@@ -34,7 +35,7 @@ class Orchestrator(object):
     aggregate results.
     """
 
-    def __init__(self, settings, summary_freq=4):
+    def __init__(self, settings, output, summary_freq=4):
         """Constructor
 
         Parameters
@@ -46,6 +47,7 @@ class Orchestrator(object):
             are displayed
         """
         self.settings = settings
+        self.output = output
         self.results = ResultSet()
         self.seq = SequenceNumber()
         self.exp_durations = collections.deque(maxlen=30)
@@ -218,6 +220,8 @@ class Orchestrator(object):
         self.n_success += 1
         # Store results
         self.results.add(params, results)
+        # Writing results at the end of each experiment
+        RESULTS_WRITER[self.settings.RESULTS_FORMAT](self.results, self.output)
         self.exp_durations.append(duration)
         if self.n_success % self.summary_freq == 0:
             # Number of experiments scheduled to be executed
@@ -349,7 +353,7 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
             nnp['update_freq'] = tree['nnp']['update_freq']
 
         logger.info('Experiment %d/%d | Start simulation', curr_exp, n_exp)
-        results = exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp)
+        results = exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp, settings.N_REPLICATIONS)
 
         duration = time.time() - start_time
         logger.info('Experiment %d/%d | End simulation | Duration %s.',

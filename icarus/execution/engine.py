@@ -30,7 +30,7 @@ def process_event(lock, barrier, requests, strategy, inx):
         strategy.process_event(req[0], lock, barrier, inx, i+1, **req[1])
 
 
-def exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp):
+def exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp, n_rep):
     """Execute the simulation of a specific scenario.
 
     Parameters
@@ -62,7 +62,8 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
         A tree with the aggregated simulation results from all collectors
     """
     cpus = mp.cpu_count()
-    print ("CPUS = ", cpus)
+    print ("CPUS = ", cpus, " N_rep = ", n_rep)
+    cpus = int(cpus/n_rep)
     #pprint(vars(topology))
     strategy_name = strategy['name']
     model = NetworkModel(topology, workload, cache_policy, **netconf)

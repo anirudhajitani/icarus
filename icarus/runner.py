@@ -105,12 +105,13 @@ def run(config_file, output, config_override):
     # Validate settings
     _validate_settings(settings, freeze=True)
     # set up orchestration
-    orch = Orchestrator(settings)
+    orch = Orchestrator(settings, output)
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT, signal.SIGABRT):
         signal.signal(sig, functools.partial(handler, settings, orch, output))
     logger.info('Launching orchestrator')
     orch.run()
     logger.info('Orchestrator finished')
-    results = orch.results
-    RESULTS_WRITER[settings.RESULTS_FORMAT](results, output)
+    # Doing it in orchestrator
+    #results = orch.results
+    #RESULTS_WRITER[settings.RESULTS_FORMAT](results, output)
     logger.info('Saved results to file %s' % os.path.abspath(output))

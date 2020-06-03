@@ -7,7 +7,7 @@ and providing them to a strategy instance.
 """
 from icarus.execution import NetworkModel, NetworkView, NetworkController, CollectorProxy
 from icarus.registry import DATA_COLLECTOR, STRATEGY
-
+from pprint import pprint
 from itertools import islice, takewhile, repeat
 import multiprocessing as mp
 import threading as th
@@ -23,14 +23,14 @@ def error_callback(args):
     print ("ERROR!!!!!")
 
 def process_event(lock, barrier, requests, strategy, inx):
-    print ("REQUEST PROCESS", requests)
+    #print ("REQUEST PROCESS", requests)
     for i, req in enumerate(requests):
         #print ("Time, Event ", req[0], req[1])
         #print ("IDDDD", id(strategy))
         strategy.process_event(req[0], lock, barrier, inx, i+1, **req[1])
 
 
-def exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors):
+def exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp):
     """Execute the simulation of a specific scenario.
 
     Parameters
@@ -63,8 +63,10 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     """
     cpus = mp.cpu_count()
     print ("CPUS = ", cpus)
+    #pprint(vars(topology))
+    strategy_name = strategy['name']
     model = NetworkModel(topology, workload, cache_policy, **netconf)
-    view = NetworkView(model, cpus)
+    view = NetworkView(model, cpus, nnp, strategy_name)
     controller = NetworkController(model, cpus)
     print ("Network Done")
     collectors_inst = [DATA_COLLECTOR[name](view, **params)
@@ -72,7 +74,6 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     collector = CollectorProxy(view, collectors_inst)
     controller.attach_collector(collector)
     print ("Collector done")
-    strategy_name = strategy['name']
     strategy_args = {k: v for k, v in strategy.items() if k != 'name'}
     strategy_inst = STRATEGY[strategy_name](view, controller, **strategy_args)
     print ("Strategy done")

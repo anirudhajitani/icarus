@@ -16,17 +16,20 @@ import logging
 
 import networkx as nx
 import fnss
-
+import sys
 from itertools import count
 from itertools import combinations
+import collections
 from collections import namedtuple
 import numpy as np
+from pprint import pprint
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
-
+from matplotlib import pyplot as plt
+import matplotlib
 from icarus.registry import CACHE_POLICY
 from icarus.util import iround, path_links
 
@@ -43,8 +46,9 @@ logger = logging.getLogger('orchestration')
 #Uncomment and provide manual seed if needed
 #torch.manual_seed()
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 SavedAction = namedtuple('SavedAction', ['log_prob', 'value'])
-
+SavedAction2 = namedtuple('SavedAction2', ['log_prob', 'value'])
 
 def symmetrify_paths(shortest_paths):
     """Make paths symmetric
@@ -119,6 +123,7 @@ class Policy(nn.Module):
         # action and reward buffer
         self.saved_actions = []
         self.rewards = []
+        self.to(device)
 
     def forward(self, x):
         """
@@ -149,7 +154,7 @@ class Agent(object):
     is executing.
     """
 
-    def __init__(self, view, router, ver):
+    def __init__(self, view, router, ver, gamma=0.9, lr=3e-2, window=250):
         """Constructor
         
         Parameters
@@ -162,28 +167,40 @@ class Agent(object):
                              'NetworkView')
         self.view = view
         self.cache = router
+        self.cache_size = self.view.model.cache_size[self.cache]
         #If all cache are equal size, can be moved to model
-        self.action_choice = []
-        self.valid_action = []
-        #All possible combinations of files (assuming minimum size of file is 1)
-        print ("Cache size : ", self.view.model.cache_size[self.cache])
-        for i in range(1, self.view.model.cache_size[self.cache] + 1):
-            self.action_choice.extend(list(combinations(self.view.lib, i))) 
-        #print ("Action choices : ", self.action_choice)
-        #Filter out choice which don't add up to cache size
-        for value in self.action_choice:
-            val = list(value)
-            sum_list = 0
-            for v in val:
-                sum_list += self.view.model.workload.contents_len[v]
-            #print ("Val : ", val, " Sum : ", sum_list)
-            if sum_list <= self.view.model.cache_size[self.cache]:
-                self.valid_action.append(value)
-        print ("Content Lens : " ,self.view.model.workload.contents_len)
-        print ("Action choices after : ", self.valid_action)
-        del self.action_choice
-        self.gamma = 0.9
+        self.count = 0
+        self.count2 = 1
+        self.gamma = gamma
         self.rewards = 0
+        self.valid_action = [0, 1]
+        #self.indexes = np.zeros((self.view.model.cache_size[self.cache]), dtype=float)
+        if self.view.strategy_name in ['INDEX', 'INDEX_DIST']:
+            self.indexes = dict()
+        if self.view.strategy_name in ['INDEX', 'INDEX_DIST', 'RL_DEC_2F', 'RL_DEC_2D']:
+            self.requests = collections.deque(maxlen=window)
+        #All possible combinations of files (assuming minimum size of file is 1)
+        print ("Cache size : ", self.cache_size)
+        if self.view.strategy_name in ['RL_DEC_1']:
+            self.action_choice = []
+            self.valid_action = []
+            for i in range(1, self.view.model.cache_size[self.cache] + 1):
+                self.action_choice.extend(list(combinations(self.view.lib, i))) 
+            #print ("Action choices : ", self.action_choice)
+            #Filter out choice which don't add up to cache size
+            for value in self.action_choice:
+                val = list(value)
+                sum_list = 0
+                for v in val:
+                    sum_list += self.view.model.workload.contents_len[v]
+                #print ("Val : ", val, " Sum : ", sum_list)
+                if sum_list <= self.view.model.cache_size[self.cache]:
+                    self.valid_action.append(value)
+            print ("Content Lens : " ,self.view.model.workload.contents_len)
+            print ("Action choices after : ", self.valid_action)
+            del self.action_choice
+        
+        #Try to change this and see the behavior
         """
         if Version == 0
         The state comprises of all the elements currently cached in the router.
@@ -196,41 +213,69 @@ class Agent(object):
         self.state_ver = ver
         #self.action_space = combinations(
         if self.state_ver == 0:
+            if self.view.strategy_name in ['INDEX_DIST', 'RL_DEC_1', 'RL_DEC_2F', 'RL_DEC_2D']:
+                self.state_counts = np.full((len(self.view.model.library)), 0, dtype=int) 
             self.state = np.full((len(self.view.model.library)), 0, dtype=int) 
-            self.state_counts = np.full((len(self.view.model.library)), 0, dtype=int) 
+            if self.view.strategy_name in ['INDEX_DIST', 'RL_DEC_2D']:
+                self.prob = np.full((len(self.view.model.library)), 1.0, dtype=float) 
+                self.prob = self.prob/np.sum(self.prob)
+                # Prior distribution (dirchlet)
+                self.alpha = np.array(range(1, len(self.view.model.library)+1))
+                self.alpha = self.alpha[::-1]
         else:
             #TODO - if needed, we update the statistics
             self.state = np.full((self.view.model.cache_size[self.cache]), 0, dtype=int)
          
         # Initialize the policy and other neural network optimizers
-        self.policy = Policy(len(self.view.model.library), len(self.valid_action))
-        #print ("POLICY", self.policy)
-        self.optimizer = optim.Adam(self.policy.parameters(), lr=3e-2)
-        #print ("OPTIMIZER", self.optimizer)
-        self.eps = np.finfo(np.float32).eps.item()
-        #print ("EPS", self.eps)
+        #state space is lib size + 1 (for the input)
+
+        if self.view.strategy_name in ['RL_DEC_1']:
+            self.policy = Policy(len(self.view.model.library), len(self.valid_action))
+            #print ("POLICY", self.policy)
+            self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
+            #print ("OPTIMIZER", self.optimizer)
+            self.eps = np.finfo(np.float32).eps.item()
+            #print ("EPS", self.eps)
+        if self.view.strategy_name in ['RL_DEC_2F', 'RL_DEC_2D']:
+            self.policy = Policy(len(self.view.model.library)*2, len(self.valid_action))
+            #print ("POLICY", self.policy)
+            self.policy2 = Policy(self.cache_size, self.cache_size)
+            self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
+            self.optimizer2 = optim.Adam(self.policy2.parameters(), lr=lr)
+            #print ("OPTIMIZER", self.optimizer)
+            self.eps = np.finfo(np.float32).eps.item()
+            self.eps2 = np.finfo(np.float32).eps.item()
+            #print ("EPS", self.eps)
+
 
     def get_state(self):
         """
         Returns the current state of the cache.
         """
+        if self.view.strategy_name in ['INDEX', 'INDEX_DIST', 'RL_DEC_1', 'RL_DEC_2F']:
+            return self.state_counts
+        if self.view.strategy_name in ['RL_DEC_2D']:
+            return self.prob
+    
+    def get_cache_dump(self):
+        """ 
+            Return cache dump of node
+        """
         contents = self.view.cache_dump(self.cache)
-        if self.state_ver == 0:
-            for c in contents :
-                self.state[c-1] = 1
-        else:
-            for i in range(len(contents)) :
-                self.state[i] = contents[i]
-        #print ("Agent State ", self.cache, " : ")
-        #print (self.state)
-        return self.state
-    
-    def get_state_2(self):
-        """
-        Returns the current state of the cache.
-        """
-        return self.state_counts
-    
+        if self.view.strategy_name in ['RL_DEC_2F']:
+            state_con = np.full((self.cache_size), 0, dtype=int)
+        if self.view.strategy_name in ['RL_DEC_2D']:
+            state_con = np.full((self.cache_size), 0, dtype=float)
+        i = 0
+        for c in contents :
+            if self.view.strategy_name in ['RL_DEC_2F']:
+                state_con[i] = self.state_counts[c-1]
+            elif self.view.strategy_name in ['RL_DEC_2D']:
+                state_con[i] = self.prob[c-1]
+            i += 1
+        return state_con
+
+
     def decode_action(self, action):
         """
         Decode the action and return a vector of binary values signifying which caches
@@ -245,59 +290,8 @@ class Agent(object):
         print ("Action decoded", action_decoded)
         return action_decoded
 
-    """
-    def perform_action(action):
-        Decode the actions provided by the policy network
-        Cache files according to the action selected
-        
-        #TODO - One of the scenarios that can happen that can add delay:
-        Files needs to be cached but removed based on LRU, so one file can 
-        be deleted and then fetched again in the same iteration.
-        SO we create a list of files to be fetched and list of files
-        to be deleted, first delete the files and then get the rest to cache.
-        
-        add_contents = []
-        remove_contents = []
-        existing_contents = self.view.cache_dump(self.cache)
-        for a in range(action.shape(0)):
-            if action[a] == 1:
-                #here get_content called without content so cache hit/miss can be computed,
-                if self.controller.get_content(self.cache, a+1) is False:
-                    add_contents.append(a+1)
-            else:
-                if a+1 in existing_contents:
-                    remove_contents.append(a+1)
-        
-        print ("To be added ", add_contents)
-        print ("To be removed ", remove_contents)
-        
-        for rc in remove_contents:
-            self.controller.remove_content(self.cache, rc)             
-        for ac in add_contents:
-            # Get location of all nodes that has the content stored
-            content_loc = self.view.content_locations(content)
-            min_delay = sys.maxint
-            # Finding the path with the minimum delay in the network
-            for c in content_loc :
-                delay = self.view.shortest_path_len(self.cache, c)
-                if delay < min_delay:
-                    min_delay = delay
-                    serving_node = c
-
-            # fetching the data
-            min_path = self.view.shortest_path(self.cache, c)
-            for u, v in path_links(min_path):
-                self.controller.forward_request_hop(u, v)
-            
-            # update the rewards for the episode
-            self.view.rewards -= min_delay
-            path = list(reversed(self.view.shortest_path(self.cache, serving_node)))
-            self.controller.forward_content_path(serving_node, self.cache, path)
-            self.controller.put_content(self.cache, ac)
-    """
-
     def select_actions(self, state):
-        state = torch.from_numpy(state).float()
+        state = torch.from_numpy(state).float().to(device)
         #print ("STATE", state)
         probs, state_value = self.policy.forward(state)
         #print ("PROBS, STATE_VAL", probs, state_value)
@@ -310,7 +304,33 @@ class Agent(object):
         #print ("Sampled Action", action)
         # save to action buffer
         self.policy.saved_actions.append(SavedAction(m.log_prob(action), state_value))
+        cache_cont = self.view.cache_dump(self.cache)
+        #print ("CACHE DUMP", cache_cont, len(cache_cont))
+        # Only if cache dump is equal to max cache size we need to find what obj to evict
+        if action.item() == 1 and len(cache_cont) == self.cache_size:
+            state2 = self.get_cache_dump()
+            action2 = self.select_actions_2(state2)
+            #print ("Return evicted content", cache_cont[action2])
+            #Return the content that needs to be removed rather than action choice in 2nd argument
+            return [action.item(), cache_cont[action2]]
+        # return the action
+        return [action.item()]
 
+    def select_actions_2(self, state):
+        state = torch.from_numpy(state).float().to(device)
+        #print ("STATE", state)
+        probs, state_value = self.policy2.forward(state)
+        #print ("PROBS2, STATE_VAL2", probs, state_value)
+        # create categorical distribution over list of probabilities of actions
+        m = Categorical(probs)
+        #print ("Output of NN 2")
+        #print (m)
+        # sample an action from the categorical distribution
+        action = m.sample()
+        #print ("Sampled Action 2", action)
+        # save to action buffer
+        self.policy2.saved_actions.append(SavedAction2(m.log_prob(action), state_value))
+        self.count2 += 1
         # return the action
         return action.item()
 
@@ -333,7 +353,7 @@ class Agent(object):
             #print ("Reward : ", r)
             R = r + self.gamma * R
             returns.insert(0, R)
-        returns = torch.tensor(returns)
+        returns = torch.tensor(returns, device=device)
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
         #print ("Returns ", returns)
 
@@ -345,7 +365,7 @@ class Agent(object):
             policy_losses.append(-log_prob * advantage)
 
             # calulate critic (value) loss using L1 smooth loss
-            value_losses.append(F.smooth_l1_loss(value, torch.tensor([R])))
+            value_losses.append(F.smooth_l1_loss(value, torch.tensor([R], device=device)))
         
         #print ("Policy Loss ", policy_losses)
         #print ("Value Loss ", value_losses)
@@ -354,16 +374,71 @@ class Agent(object):
         #print ("Optimizer gradient")
         # sum up all the values of policy_losses and value_losses
         loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum()
-        print ("Total Loss ", loss)
+        #print ("Total Loss ", loss)
         # perform backprop
-        loss.backward()
+        loss.backward(retain_graph=True)
         #print ("Backprop Loss")
+        #torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
+        #print ("Gradients Clip")
         self.optimizer.step()
         #print ("Optimizer Step")
         # reset rewards and action buffers
         del self.policy.rewards[:]
         del self.policy.saved_actions[:]
         #print ("Deleted policy and saved actions")
+
+    def update2(self):
+        """
+
+        Training code. Calculates actor and critic loss and performn backpropogation.
+        """
+        #print ("UPDATE FN")
+        R = 0
+        saved_actions = self.policy2.saved_actions
+        policy_losses = [] # list to save actor (policy) loss
+        value_losses = [] # list to save critic (policy) loss
+        returns = [] # list to save true values
+        # calculate the true value using rewards returned from the environment
+        # this reward is appended by the environment 
+        for r in self.policy2.rewards[::-1]:
+            # calculate the discounted value
+            #print ("Reward : ", r)
+            R = r + self.gamma * R
+            returns.insert(0, R)
+        returns = torch.tensor(returns, device=device)
+        returns = (returns - returns.mean()) / (returns.std() + self.eps2)
+        #print ("Returns ", returns)
+
+        #print ("Saved Actions", saved_actions)
+        for (log_prob, value), R in zip(saved_actions, returns):
+            advantage = R - value.item()
+
+            # calculate actor (policy) loss
+            policy_losses.append(-log_prob * advantage)
+
+            # calulate critic (value) loss using L1 smooth loss
+            value_losses.append(F.smooth_l1_loss(value, torch.tensor([R], device=device)))
+        
+        #print ("Policy Loss ", policy_losses)
+        #print ("Value Loss ", value_losses)
+        # reset gradients
+        self.optimizer2.zero_grad()
+        #print ("Optimizer gradient")
+        # sum up all the values of policy_losses and value_losses
+        loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum()
+        #print ("Total Loss ", loss)
+        # perform backprop
+        loss.backward(retain_graph=True)
+        #print ("Backprop Loss")
+        #torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
+        #print ("Gradients Clip")
+        self.optimizer2.step()
+        #print ("Optimizer Step")
+        # reset rewards and action buffers
+        del self.policy2.rewards[:]
+        del self.policy2.saved_actions[:]
+        #print ("Deleted policy and saved actions")
+
 
 class NetworkView(object):
     """Network view
@@ -374,7 +449,7 @@ class NetworkView(object):
     characteristics of links and currently cached objects in nodes.
     """
 
-    def __init__(self, model, cpus):
+    def __init__(self, model, cpus, nnp, strategy_name):
         """Constructor
 
         Parameters
@@ -385,22 +460,35 @@ class NetworkView(object):
         if not isinstance(model, NetworkModel):
             raise ValueError('The model argument must be an instance of '
                              'NetworkModel')
+        #TODO - objects allocate only based on strategy (no need to assign data if not used
         self.model = model
         self.count = 0
         self.common_rewards = 0
+        self.strategy_name = strategy_name
         #Different because other library is a set, here we want to preserve ordering
         self.lib = [item for item in range(0, len(self.model.library))]
         #Contains the agents as objects of Class Agent
         self.agents = []
         self.cpus = cpus
+        if 'lr' not in nnp:
+            nnp['lr'] = 3e-2
+        if 'gamma' not in nnp:
+            nnp['gamma'] = 0.9
+        if 'window' not in nnp:
+            nnp['window'] = 250
+        if 'update_freq' not in nnp:
+            nnp['update_freq'] = 100
         #self.status = [False] * cpus
         #self.ind_count = [0] * cpus
+        self.update_freq = nnp['update_freq']
+        self.window = nnp['window']
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
-            self.agents.append(Agent(self, r, 0))
-        self.agents_per_thread = int(len(self.agents)/cpus)
-        self.extra_agents = len(self.agents) % cpus
-        print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
+            self.agents.append(Agent(self, r, 0,  nnp['gamma'], nnp['lr'], nnp['window']))
+        if strategy_name == 'RL_DEC_1':
+            self.agents_per_thread = int(len(self.agents)/cpus)
+            self.extra_agents = len(self.agents) % cpus
+            #print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
     """
     def env_step():
 
@@ -725,10 +813,10 @@ class NetworkModel(object):
         self.shortest_path = dict(shortest_path) if shortest_path is not None \
                              else symmetrify_paths(dict(nx.all_pairs_dijkstra_path(topology)))
        
-        print ("Shortest Path Lengths: ", dict(nx.all_pairs_dijkstra_path_length(topology)))
         # Shortest paths length of the network
         self.shortest_path_len = dict(shortest_path_len) if shortest_path_len is not None \
-                                else symmetrify_paths_len(dict(nx.all_pairs_dijkstra_path_length(topology)))
+                                else symmetrify_paths_len(dict(nx.all_pairs_dijkstra_path_length(topology, weight='delay')))
+        #print ("Shortest Path Lengths: ", self.shortest_path_len)
         # Network topology
         self.topology = topology
         self.workload = workload
@@ -741,6 +829,8 @@ class NetworkModel(object):
         self.routers = []
         #List of all files in the library
         self.library = set()
+        # Color dictionary
+        self.color_dict = dict()
         # Dictionary of link types (internal/external)
         self.link_type = nx.get_edge_attributes(topology, 'type')
         self.link_delay = fnss.get_delays(topology)
@@ -763,12 +853,16 @@ class NetworkModel(object):
                 if 'cache_size' in stack_props:
                     self.cache_size[node] = stack_props['cache_size']
                     self.routers.append(node)
+                    self.color_dict[node] = 'r'
             elif stack_name == 'source':
                 contents = stack_props['contents']
+                self.color_dict[node] = 'b'
                 self.source_node[node] = contents
                 for content in contents:
                     self.library.add(content)
                     self.content_source[content] = node
+            else:
+                    self.color_dict[node] = 'g'
         if any(c < 1 for c in self.cache_size.values()):
             logger.warn('Some content caches have size equal to 0. '
                         'I am setting them to 1 and run the experiment anyway')
@@ -797,6 +891,21 @@ class NetworkModel(object):
         self.removed_sources = {}
         self.removed_caches = {}
         self.removed_local_caches = {}
+        #self.plot_graph(topology, self.color_dict)
+
+    def plot_graph(self, topology, color_dict):
+        nx.draw(topology,
+            nodelist=color_dict,
+            node_size=1000,
+            node_color=[i
+                    for i in color_dict.values()],
+            with_labels=True)
+        #nx.draw(G, cmap=plt.get_cmap('viridis'), node_color=values, with_labels=True, font_color='white')
+        #nx.draw_networkx(topology, pos=nx.drawing.layout.spring_layout(topology), cmap=color_dict)
+        #labels = nx.get_edge_attributes(topology,'delay')
+        #nx.draw_networkx_edge_labels(topology,pos=nx.drawing.layout.spring_layout(topology),edge_labels=labels)
+        plt.savefig("topo_.png")
+        print ("DIAGRAM SAVED")
 
 
 class NetworkController(object):
@@ -833,7 +942,7 @@ class NetworkController(object):
         """Detach the data collector."""
         self.collector = None
 
-    def start_session(self, timestamp, receiver, content, log, inx, count):
+    def start_session(self, timestamp, receiver, content, inx, log, count):
         """Instruct the controller to start a new session (i.e. the retrieval
         of a content).
 
@@ -853,8 +962,8 @@ class NetworkController(object):
         self.session[inx] = dict(timestamp=timestamp,
                             receiver=receiver,
                             content=content,
-                            log=log,
                             inx=inx,
+                            log=log,
                             count=count)
         if self.collector is not None and self.session[inx]['log']:
             self.collector.start_session(timestamp, receiver, content)
@@ -875,7 +984,6 @@ class NetworkController(object):
             lead to hit a content. It is normally used to calculate latency
             correctly in multicast cases. Default value is *True*
         """
-        print ("Forward Request Path")
         if path is None:
             path = self.model.shortest_path[s][t]
         for u, v in path_links(path):

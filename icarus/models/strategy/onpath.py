@@ -5,7 +5,7 @@ import random
 import networkx as nx
 import sys
 import time
-
+import numpy as np
 from icarus.registry import register_strategy
 from icarus.util import inheritdoc, path_links
 
@@ -14,7 +14,11 @@ from .base import Strategy
 __all__ = [
        'Partition',
        'Edge',
-       'RlDec',
+       'Index',
+       'IndexDist',
+       'RlDec1',
+       'RlDec2F',
+       'RlDec2D',
        'LeaveCopyEverywhere',
        'LeaveCopyDown',
        'ProbCache',
@@ -53,18 +57,20 @@ class Partition(Strategy):
         self.cache_assignment = self.view.topology().graph['cache_assignment']
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, size, log):
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         source = self.view.content_source(content)
-        self.controller.start_session(time, receiver, content, log)
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
         cache = self.cache_assignment[receiver]
-        self.controller.forward_request_path(receiver, cache)
-        if not self.controller.get_content(cache):
-            self.controller.forward_request_path(cache, source)
-            self.controller.get_content(source)
-            self.controller.forward_content_path(source, cache, size)
-            self.controller.put_content(cache)
-        self.controller.forward_content_path(cache, receiver, size)
-        self.controller.end_session()
+        self.controller.forward_request_path(receiver, cache, inx)
+        if not self.controller.get_content(cache, inx):
+            self.controller.forward_request_path(cache, source, inx)
+            self.controller.get_content(source, inx)
+            self.controller.forward_content_path(source, cache, size, inx)
+            self.controller.put_content(cache, inx)
+        self.controller.forward_content_path(cache, receiver, size, inx)
+        self.controller.end_session(inx)
+        lock.release()
 
 
 @register_strategy('EDGE')
@@ -86,39 +92,284 @@ class Edge(Strategy):
         super(Edge, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, size, log):
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
         # Route requests to original source and queries caches on the path
-        self.controller.start_session(time, receiver, content, log)
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
         edge_cache = None
         for u, v in path_links(path):
-            self.controller.forward_request_hop(u, v)
+            self.controller.forward_request_hop(u, v, inx)
             if self.view.has_cache(v):
                 edge_cache = v
-                if self.controller.get_content(v):
+                if self.controller.get_content(v, inx):
                     serving_node = v
                 else:
                     # Cache miss, get content from source
-                    self.controller.forward_request_path(v, source)
-                    self.controller.get_content(source)
+                    self.controller.forward_request_path(v, source, inx)
+                    self.controller.get_content(source, inx)
                     serving_node = source
                 break
         else:
             # No caches on the path at all, get it from source
-            self.controller.get_content(v)
+            self.controller.get_content(v, inx)
             serving_node = v
 
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
-        self.controller.forward_content_path(serving_node, receiver, size, path)
+        self.controller.forward_content_path(serving_node, receiver, size, inx, path)
         if serving_node == source:
-            self.controller.put_content(edge_cache)
-        self.controller.end_session()
+            self.controller.put_content(edge_cache, inx)
+        self.controller.end_session(inx)
+        lock.release()
 
-@register_strategy('RL_DEC')
-class RlDec(Strategy):
+@register_strategy('INDEX')
+class Index(Strategy):
+    """Indexability caching strategy.
+
+    In this strategy, we aim to find an optimal policy where the caches
+    look at the current state of the network and try decide if it needs
+    to cache certain files or not
+    """
+
+    @inheritdoc(Strategy)
+    def __init__(self, view, controller):
+        super(Index, self).__init__(view, controller)
+   
+    def compute_index(self, agent_inx, content, v, threshold):
+        curr_len = 0
+        #print ("AGENT, Indexes Before: ", agent_inx, self.view.agents[agent_inx].indexes)
+        for k, val in self.view.agents[agent_inx].indexes.items():
+            curr_len += self.view.model.workload.contents_len[k-1]
+        # compute index of content
+        # How do we compute indexes for contents already stored in the cache (what will be the distance in this case (server)?
+        source = self.view.content_source(content)
+        delay = self.view.shortest_path_len(source, v)
+        index = self.view.agents[agent_inx].requests.count(content) * delay
+        #print ("AGENT, NEW INDEX, DELAY", agent_inx, index, delay) 
+        if curr_len + self.view.model.workload.contents_len[content-1] <= self.view.model.cache_size[self.view.agents[agent_inx].cache]:
+            self.view.agents[agent_inx].indexes[content] = index
+            return [-1]
+        else:
+            remove_len = 0
+            remove_inx = 0
+            remove_keys = []
+            indexes = self.view.agents[agent_inx].indexes.copy()
+            while curr_len - remove_len + self.view.model.workload.contents_len[content-1] > self.view.model.cache_size[self.view.agents[agent_inx].cache]:
+                key_min = min(indexes.keys(), key=(lambda k: indexes[k]))
+                remove_len += self.view.model.workload.contents_len[key_min-1]
+                remove_inx += indexes[key_min]
+                if index > remove_inx + threshold:
+                    del indexes[key_min]
+                    remove_keys.append(key_min)
+            if len(remove_keys) == 0:
+                return [-2]
+            else:
+                #print ("Remove Keys : ", remove_keys)
+                #print ("AGENT, Indexes After: ", agent_inx, self.view.agents[agent_inx].indexes)
+                for r in remove_keys:
+                    del self.view.agents[agent_inx].indexes[r]
+                self.view.agents[agent_inx].indexes[content] = index
+                return remove_keys
+
+    def update_indexes(self, agent_inx, cache, requests):
+        #print ("Indexes : ", self.view.agents[agent_inx].indexes)
+        for k,v in self.view.agents[agent_inx].indexes.items():
+            source = self.view.content_source(k)
+            #print ("Source ", source, " Content ", k, " node ", src)
+            delay = self.view.shortest_path_len(source, cache)
+            self.view.agents[agent_inx].indexes[k] = requests.count(k) * delay
+
+    @inheritdoc(Strategy)
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
+        # get all required data
+        #print ("PROCESS EVENT", time, receiver, content)
+        #print ("LOCK : ", lock)
+        #print ("ID", id(self), id(self.view), id(self.controller))
+        source = self.view.content_source(content)
+        path = self.view.shortest_path(receiver, source)
+        #self.view.ind_count[inx] = count 
+        # Route requests to original source and queries caches on the path
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
+        self.view.count += 1
+        lock.release()
+        # Get location of all nodes that has the content stored
+        content_loc = self.view.content_locations(content)
+        min_delay = sys.maxsize
+        #print ("Min Delay ", min_delay) 
+        # Finding the path with the minimum delay in the network
+        serving_node = source
+        for c in content_loc :
+            delay = self.view.shortest_path_len(receiver, c)
+            #print ("Delay : ", receiver, " , ", c, " : ", delay) 
+            if delay < min_delay:
+                min_delay = delay
+                serving_node = c
+
+        # fetching the data 
+        min_path = self.view.shortest_path(receiver, serving_node)
+        lock.acquire()
+        for u, v in path_links(min_path):
+            #Need to get rid of inx for indexability
+            self.controller.forward_request_hop(u, v, inx)
+            cont_status = self.controller.get_content(v, inx)
+            if v in self.view.model.routers:
+                agent_inx = self.view.model.routers.index(v)
+                #print ("TYPE" , type(self.view.agents[agent_inx].state_counts))
+                #self.view.agents[agent_inx].state_counts[content-1] += 1
+                self.view.agents[agent_inx].requests.append(content)
+                if cont_status == True:
+                    continue
+                self.update_indexes(agent_inx, v, self.view.agents[agent_inx].requests)
+                ret = self.compute_index(agent_inx, content, v, 10)
+                if ret[0] == -1:
+                    self.controller.put_content(v, inx)
+                elif ret[0] != -2:
+                    for r in ret:
+                        self.controller.remove_content(v, inx, r)
+                    self.controller.put_content(v, inx)
+        # update the rewards for the episode
+        self.view.common_rewards -= min_delay
+        lock.release()
+        # Return content
+        #print ("Serving Node", serving_node)
+        path = list(reversed(self.view.shortest_path(receiver, serving_node)))
+        lock.acquire()
+        #print ("LOCK ACQUIRED ", inx, count)
+        self.controller.forward_content_path(serving_node, receiver, size, inx, path)
+        self.controller.end_session(inx)
+        lock.release()
+        #print ("Session End")
+
+@register_strategy('INDEX_DIST')
+class IndexDist(Strategy):
+    """Indexability caching strategy.
+    Estimate parameter of Distribution
+    In this strategy, we aim to find an optimal policy where the caches
+    look at the current state of the network and try decide if it needs
+    to cache certain files or not
+    """
+
+    @inheritdoc(Strategy)
+    def __init__(self, view, controller):
+        super(IndexDist, self).__init__(view, controller)
+   
+    def compute_index(self, agent_inx, content, v, threshold):
+        curr_len = 0
+        #print ("AGENT, Indexes Before: ", agent_inx, self.view.agents[agent_inx].indexes)
+        for k, val in self.view.agents[agent_inx].indexes.items():
+            curr_len += self.view.model.workload.contents_len[k-1]
+        # compute index of content
+        # How do we compute indexes for contents already stored in the cache (what will be the distance in this case (server)?
+        source = self.view.content_source(content)
+        delay = self.view.shortest_path_len(source, v)
+        index = self.view.agents[agent_inx].prob[content-1] * delay
+        #print ("AGENT, NEW INDEX, DELAY", agent_inx, index, delay) 
+        if curr_len + self.view.model.workload.contents_len[content-1] <= self.view.model.cache_size[self.view.agents[agent_inx].cache]:
+            self.view.agents[agent_inx].indexes[content] = index
+            return [-1]
+        else:
+            remove_len = 0
+            remove_inx = 0
+            remove_keys = []
+            indexes = self.view.agents[agent_inx].indexes.copy()
+            while curr_len - remove_len + self.view.model.workload.contents_len[content-1] > self.view.model.cache_size[self.view.agents[agent_inx].cache]:
+                key_min = min(indexes.keys(), key=(lambda k: indexes[k]))
+                remove_len += self.view.model.workload.contents_len[key_min-1]
+                remove_inx += indexes[key_min]
+                if index > remove_inx + threshold:
+                    del indexes[key_min]
+                    remove_keys.append(key_min)
+            if len(remove_keys) == 0:
+                return [-2]
+            else:
+                #print ("Remove Keys : ", remove_keys)
+                #print ("AGENT, Indexes After: ", agent_inx, self.view.agents[agent_inx].indexes)
+                for r in remove_keys:
+                    del self.view.agents[agent_inx].indexes[r]
+                self.view.agents[agent_inx].indexes[content] = index
+                return remove_keys
+
+    def update_indexes(self, agent_inx, cache):
+        #print ("Indexes : ", self.view.agents[agent_inx].indexes)
+        for k,v in self.view.agents[agent_inx].indexes.items():
+            source = self.view.content_source(k)
+            #print ("Source ", source, " Content ", k, " node ", src)
+            delay = self.view.shortest_path_len(source, cache)
+            self.view.agents[agent_inx].indexes[k] = self.view.agents[agent_inx].prob[k-1] * delay
+
+    @inheritdoc(Strategy)
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
+        # get all required data
+        #print ("PROCESS EVENT", time, receiver, content)
+        #print ("LOCK : ", lock)
+        #print ("ID", id(self), id(self.view), id(self.controller))
+        source = self.view.content_source(content)
+        path = self.view.shortest_path(receiver, source)
+        #self.view.ind_count[inx] = count 
+        # Route requests to original source and queries caches on the path
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
+        self.view.count += 1
+        lock.release()
+        # Get location of all nodes that has the content stored
+        content_loc = self.view.content_locations(content)
+        min_delay = sys.maxsize
+        #print ("Min Delay ", min_delay) 
+        # Finding the path with the minimum delay in the network
+        serving_node = source
+        for c in content_loc :
+            delay = self.view.shortest_path_len(receiver, c)
+            #print ("Delay : ", receiver, " , ", c, " : ", delay) 
+            if delay < min_delay:
+                min_delay = delay
+                serving_node = c
+
+        # fetching the data 
+        min_path = self.view.shortest_path(receiver, serving_node)
+        lock.acquire()
+        for u, v in path_links(min_path):
+            #Need to get rid of inx for indexability
+            self.controller.forward_request_hop(u, v, inx)
+            cont_status = self.controller.get_content(v, inx)
+            if v in self.view.model.routers:
+                agent_inx = self.view.model.routers.index(v)
+                #print ("TYPE" , type(self.view.agents[agent_inx].state_counts))
+                #Updating prior and frequency
+                self.view.agents[agent_inx].state_counts[content-1] += 1
+                self.view.agents[agent_inx].alpha[content-1] += 1
+                if cont_status == True:
+                    continue
+                #Updating probability of multinomial distribution
+                self.view.agents[agent_inx].prob = (self.view.agents[agent_inx].state_counts + self.view.agents[agent_inx].alpha) \
+                                                    / (np.sum(self.view.agents[agent_inx].state_counts) + np.sum(self.view.agents[agent_inx].alpha))
+                self.update_indexes(agent_inx, v)
+                #print ("PROBABILITY", agent_inx, self.view.agents[agent_inx].prob)
+                ret = self.compute_index(agent_inx, content, v, 1)
+                if ret[0] == -1:
+                    self.controller.put_content(v, inx)
+                elif ret[0] != -2:
+                    for r in ret:
+                        self.controller.remove_content(v, inx, r)
+                    self.controller.put_content(v, inx)
+        # update the rewards for the episode
+        self.view.common_rewards -= min_delay
+        lock.release()
+        # Return content
+        #print ("Serving Node", serving_node)
+        path = list(reversed(self.view.shortest_path(receiver, serving_node)))
+        lock.acquire()
+        #print ("LOCK ACQUIRED ", inx, count)
+        self.controller.forward_content_path(serving_node, receiver, size, inx, path)
+        self.controller.end_session(inx)
+        lock.release()
+        #print ("Session End")
+
+@register_strategy('RL_DEC_1')
+class RlDec1(Strategy):
     """Reinforcement Learning Decentralized caching strategy.
 
     In this strategy, we aim to find an optimal policy where the caches
@@ -128,7 +379,7 @@ class RlDec(Strategy):
 
     @inheritdoc(Strategy)
     def __init__(self, view, controller):
-        super(RlDec, self).__init__(view, controller)
+        super(RlDec1, self).__init__(view, controller)
     
     def get_agent_indexes(self, inx):
         start = inx * self.view.agents_per_thread
@@ -150,8 +401,8 @@ class RlDec(Strategy):
         #print ("ENV STEP")
         start, end = self.get_agent_indexes(inx)
         for i in range(start,end):
-            curr_state = self.view.agents[i].get_state_2()
-            print ("STATE for ", i, " = ", curr_state)
+            curr_state = self.view.agents[i].get_state()
+            #print ("STATE for ", i, " = ", curr_state)
             action = self.view.agents[i].select_actions(curr_state)
             action = self.view.agents[i].decode_action(action)
             self.view.agents[i].rewards -= self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
@@ -195,13 +446,16 @@ class RlDec(Strategy):
         #print ("To be added ", add_contents)
         #print ("To be removed ", remove_contents)
     
-        min_delay = sys.maxsize
         for rc in remove_contents:
             self.controller.remove_content(cache, inx, rc)
         lock.acquire()
+        rew = 0
         for ac in add_contents:
             # Get location of all nodes that has the content stored
             content_loc = self.view.content_locations(ac)
+            min_delay = sys.maxsize
+            delay = 0
+            serving_node = self.view.content_source(ac)
             # Finding the path with the minimum delay in the network
             for c in content_loc :
                 delay = self.view.shortest_path_len(cache, c)
@@ -213,7 +467,7 @@ class RlDec(Strategy):
             min_path = self.view.shortest_path(cache, serving_node)
             for u, v in path_links(min_path):
                 self.controller.forward_request_hop(u, v, inx)
-
+            rew += delay
             # update the rewards for the episode
             #print ("DELAY IN FETCHING", min_delay)
             path = list(reversed(self.view.shortest_path(cache, serving_node)))
@@ -221,7 +475,7 @@ class RlDec(Strategy):
             self.controller.put_content(cache, ac, inx)
         lock.release()
         #print ("CACHE DUMP ", cache, " = ", self.view.cache_dump(cache))
-        return min_delay
+        return rew
 
     @inheritdoc(Strategy)
     def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
@@ -234,18 +488,19 @@ class RlDec(Strategy):
         #self.view.ind_count[inx] = count 
         # Route requests to original source and queries caches on the path
         lock.acquire()
-        self.controller.start_session(time, receiver, content, log, inx, count)
+        self.controller.start_session(time, receiver, content, inx, log, count)
         self.view.count += 1
         lock.release()
         #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:
-        if count % 50 == 0:
+        if count % self.view.update_freq == 0:
             self.env_step(size, inx, lock) 
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
         min_delay = sys.maxsize
         #print ("Min Delay ", min_delay) 
         # Finding the path with the minimum delay in the network
+        serving_node = source
         for c in content_loc :
             delay = self.view.shortest_path_len(receiver, c)
             #print ("Delay : ", receiver, " , ", c, " : ", delay) 
@@ -257,8 +512,9 @@ class RlDec(Strategy):
         min_path = self.view.shortest_path(receiver, serving_node)
         lock.acquire()
         for u, v in path_links(min_path):
+            #Need to get rid of inx for indexability
             self.controller.forward_request_hop(u, v, inx)
-            self.controller.get_content(v, inx)
+            cont_status = self.controller.get_content(v, inx)
             if v in self.view.model.routers:
                 agent_inx = self.view.model.routers.index(v)
                 #print ("TYPE" , type(self.view.agents[agent_inx].state_counts))
@@ -266,46 +522,20 @@ class RlDec(Strategy):
         # update the rewards for the episode
         self.view.common_rewards -= min_delay
         lock.release()
-        """
-        if self.view.ind_count[inx] % 50 == 0:
-            #while not all(item == self.view.ind_count[inx] for item in self.view.ind_count):
-            while not self.view.ind_count.count(self.view.ind_count[0]) == len(self.view.ind_count):
-                print (self.view.count, self.view.ind_count[inx], inx)
-                continue
-        #if self.view.ind_count[inx] % 50 == 0 and all(item == self.view.ind_count[inx] for item in self.view.ind_count):
-        if self.view.ind_count[inx] % 50 == 0 and self.view.ind_count.count(self.view.ind_count[0]) == len(self.view.ind_count):
-            print ("REWARD GIVEN")
-            self.view.status[inx] = False
-            start, end = self.get_agent_indexes(inx)
-            for i in range(start,end):
-                self.view.agents[i].rewards -= self.view.common_rewards
-                self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
-                self.view.agents[i].rewards = 0
-            self.view.common_rewards = 0
-            self.view.status[inx] = True
-            while not all(item == True for item in self.view.status):
-                print ("Waiting ", self.view.count, self.view.ind_count[inx], inx)
-                #print ("Waiting for all")
-                continue
-            print ("DONE  ", inx, " ", count, " ", self.view.count)
-            #time.sleep(100)
-            #print ("AGENT ", a , " REWARDS ", a.policy.rewards.append)
-        """
-        #"""
-        #if self.view.ind_count[inx] % 50 == 0:
-        if count % 50 == 0:
+        
+        if count % self.view.update_freq == 0:
             barrier.wait() 
             start, end = self.get_agent_indexes(inx)
             for i in range(start,end):
                 self.view.agents[i].rewards -= self.view.common_rewards
                 self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
                 self.view.agents[i].rewards *= 0
-                self.view.agents[i].state_counts *= 0
                 #print ("TYPE 2" , type(self.view.agents[agent_inx].state_counts))
             self.view.common_rewards *= 0
             barrier.wait()
-        #"""
-        if count % 200 == 0:
+        
+        if count % (self.view.update_freq * 5) == 0:
+            self.view.agents[i].state_counts *= 0
             self.update_gradients(inx)
         # Return content
         #print ("Serving Node", serving_node)
@@ -317,6 +547,288 @@ class RlDec(Strategy):
         lock.release()
         #print ("Session End")
         
+@register_strategy('RL_DEC_2F')
+class RlDec2F(Strategy):
+    """Reinforcement Learning Decentralized caching strategy.
+
+    In this strategy, we aim to find an optimal policy where the caches
+    look at the current state of the network and try decide if it needs
+    to cache certain files or not
+    """
+
+    @inheritdoc(Strategy)
+    def __init__(self, view, controller):
+        super(RlDec2F, self).__init__(view, controller)
+    
+    def env_step(self, i, size, lock, content, delay):
+        """
+
+        A step of the environment includes the following for all agents:
+        1. get the current state of each agent
+        2. select actions
+        3. perform the actions
+        """
+        #print ("ENV STEP")
+        curr_state = self.view.agents[i].get_state()
+        app_state = np.full((curr_state.size),0, dtype=int)
+        app_state[content-1] = delay
+        curr_state = np.append(curr_state, app_state)
+        #print ("STATE for ", i, " = ", curr_state)
+        action = self.view.agents[i].select_actions(curr_state)
+        #For this case no need for decode action 0 or 1 (no cache, cache)
+        #action = self.view.agents[i].decode_action(action)
+        #Rewards will be given later once calculation is done
+        #self.view.agents[i].rewards -= self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
+        return action
+
+    @inheritdoc(Strategy)
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
+        # get all required data
+        #print ("PROCESS EVENT", time, receiver, content)
+        #print ("LOCK : ", lock)
+        #print ("ID", id(self), id(self.view), id(self.controller))
+        source = self.view.content_source(content)
+        path = self.view.shortest_path(receiver, source)
+        #self.view.ind_count[inx] = count 
+        # Route requests to original source and queries caches on the path
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
+        self.view.count += 1
+        lock.release()
+        #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
+        #if self.view.count % 50 == 0:
+        #if count % self.view.update_freq == 0:
+        #    self.env_step(size, inx, lock) 
+        # Get location of all nodes that has the content stored
+        content_loc = self.view.content_locations(content)
+        min_delay = sys.maxsize
+        #print ("Min Delay ", min_delay) 
+        # Finding the path with the minimum delay in the network
+        serving_node = source
+        for c in content_loc :
+            delay = self.view.shortest_path_len(receiver, c)
+            #print ("Delay : ", receiver, " , ", c, " : ", delay) 
+            if delay < min_delay:
+                min_delay = delay
+                serving_node = c
+
+        # fetching the data 
+        min_path = self.view.shortest_path(receiver, serving_node)
+        lock.acquire()
+        for u, v in path_links(min_path):
+            #Need to get rid of inx for indexability
+            self.controller.forward_request_hop(u, v, inx)
+            cont_status = self.controller.get_content(v, inx)
+            if v in self.view.model.routers:
+                agent_inx = self.view.model.routers.index(v)
+                #print ("TYPE" , type(self.view.agents[agent_inx].state_counts))
+                #Rather than calculating state counts over moving window everytime do it here in online manner
+                if len(self.view.agents[agent_inx].requests) == self.view.window:
+                    rem = self.view.agents[agent_inx].requests.popleft()
+                    self.view.agents[agent_inx].state_counts[rem-1] -= 1
+                #get state_2 (need to reset after window size)
+                self.view.agents[agent_inx].state_counts[content-1] += 1
+                self.view.agents[agent_inx].requests.append(content)
+                self.view.agents[agent_inx].count += 1
+                if cont_status == True:
+                    continue
+                action = self.env_step(agent_inx, size, lock, content, self.view.shortest_path_len(receiver, v))
+                #print ("ACTION TO PERFORM", agent_inx, action)
+                if action[0] == 1:
+                    #TODO run another policy network to find out what content to remove
+                    #By default it will use the LRU policy
+                    #rewards = add frequency count of cached content and subtract of evicted content + reward is delay between this cache
+                    #and receiver
+                    if len(action) == 2:
+                        evicted = action[1]
+                        self.controller.remove_content(evicted, inx)
+                    else:
+                        evicted = None
+                    self.controller.put_content(v, inx)
+                    self.view.agents[agent_inx].rewards += self.view.agents[agent_inx].requests.count(content)
+                    self.view.agents[agent_inx].rewards -= self.view.shortest_path_len(receiver, v)
+                    if evicted is not None:
+                        self.view.agents[agent_inx].rewards -= self.view.agents[agent_inx].requests.count(evicted)
+                        #print ("EVICTED ", evicted, " COUNT ", self.view.agents[agent_inx].requests.count(evicted))
+                        self.view.agents[agent_inx].policy2.rewards.append(self.view.agents[agent_inx].rewards)
+                else:
+                    #rewards = delay from content loc to receiver
+                    self.view.agents[agent_inx].rewards -= min_delay
+                #TODO - find how to give rewards
+                self.view.agents[agent_inx].policy.rewards.append(self.view.agents[agent_inx].rewards)
+                self.view.agents[agent_inx].rewards = 0
+                if self.view.agents[agent_inx].count % 100 == 0:
+                    self.view.agents[agent_inx].update()
+                if self.view.agents[agent_inx].count2 % 50 == 0 and len(self.view.agents[agent_inx].policy2.saved_actions) != 0:
+                    self.view.agents[agent_inx].update2()
+        # update the rewards for the episode
+        #self.view.common_rewards -= min_delay
+        lock.release()
+        
+        """
+        if count % self.view.update_freq == 0:
+            self.view.agents[i].rewards -= self.view.common_rewards
+            self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
+            self.view.agents[i].rewards *= 0
+            #print ("TYPE 2" , type(self.view.agents[agent_inx].state_counts))
+            self.view.common_rewards *= 0
+        if count % (self.view.update_freq * 5) == 0:
+            self.view.agents[i].state_counts *= 0
+            self.update_gradients(inx)
+       """ 
+        # Return content
+        #print ("Serving Node", serving_node)
+        path = list(reversed(self.view.shortest_path(receiver, serving_node)))
+        lock.acquire()
+        #print ("LOCK ACQUIRED ", inx, count)
+        self.controller.forward_content_path(serving_node, receiver, size, inx, path)
+        self.controller.end_session(inx)
+        lock.release()
+        #print ("Session End")
+        
+@register_strategy('RL_DEC_2D')
+class RlDec2D(Strategy):
+    """Reinforcement Learning Decentralized caching strategy.
+
+    In this strategy, we aim to find an optimal policy where the caches
+    look at the current state of the network and try decide if it needs
+    to cache certain files or not
+    """
+
+    @inheritdoc(Strategy)
+    def __init__(self, view, controller):
+        super(RlDec2D, self).__init__(view, controller)
+    
+    def env_step(self, i, size, lock, content, delay):
+        """
+
+        A step of the environment includes the following for all agents:
+        1. get the current state of each agent
+        2. select actions
+        3. perform the actions
+        """
+        #print ("ENV STEP")
+        curr_state = self.view.agents[i].get_state()
+        app_state = np.full((curr_state.size),0.0, dtype=float)
+        app_state[content-1] = delay
+        curr_state = np.append(curr_state, app_state)
+        #print ("STATE for ", i, " = ", curr_state)
+        action = self.view.agents[i].select_actions(curr_state)
+        #For this case no need for decode action 0 or 1 (no cache, cache)
+        #action = self.view.agents[i].decode_action(action)
+        #Rewards will be given later once calculation is done
+        #self.view.agents[i].rewards -= self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
+        return action
+
+    @inheritdoc(Strategy)
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
+        # get all required data
+        #print ("PROCESS EVENT", time, receiver, content)
+        #print ("LOCK : ", lock)
+        #print ("ID", id(self), id(self.view), id(self.controller))
+        source = self.view.content_source(content)
+        path = self.view.shortest_path(receiver, source)
+        #self.view.ind_count[inx] = count 
+        # Route requests to original source and queries caches on the path
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
+        self.view.count += 1
+        lock.release()
+        #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
+        #if self.view.count % 50 == 0:
+        #if count % self.view.update_freq == 0:
+        #    self.env_step(size, inx, lock) 
+        # Get location of all nodes that has the content stored
+        content_loc = self.view.content_locations(content)
+        min_delay = sys.maxsize
+        #print ("Min Delay ", min_delay) 
+        # Finding the path with the minimum delay in the network
+        serving_node = source
+        for c in content_loc :
+            delay = self.view.shortest_path_len(receiver, c)
+            #print ("Delay : ", receiver, " , ", c, " : ", delay) 
+            if delay < min_delay:
+                min_delay = delay
+                serving_node = c
+
+        # fetching the data 
+        min_path = self.view.shortest_path(receiver, serving_node)
+        lock.acquire()
+        for u, v in path_links(min_path):
+            #Need to get rid of inx for indexability
+            self.controller.forward_request_hop(u, v, inx)
+            cont_status = self.controller.get_content(v, inx)
+            if v in self.view.model.routers:
+                agent_inx = self.view.model.routers.index(v)
+                #print ("TYPE" , type(self.view.agents[agent_inx].state_counts))
+                #Rather than calculating state counts over moving window everytime do it here in online manner
+                if len(self.view.agents[agent_inx].requests) == self.view.window:
+                    rem = self.view.agents[agent_inx].requests.popleft()
+                    self.view.agents[agent_inx].state_counts[rem-1] -= 1
+                #get state_2 (need to reset after window size)
+                self.view.agents[agent_inx].state_counts[content-1] += 1
+                self.view.agents[agent_inx].count += 1
+                self.view.agents[agent_inx].requests.append(content)
+                self.view.agents[agent_inx].alpha[content-1] += 1
+                
+                if cont_status == True:
+                    continue
+                self.view.agents[agent_inx].prob = (self.view.agents[agent_inx].state_counts + self.view.agents[agent_inx].alpha) \
+                                                     / (np.sum(self.view.agents[agent_inx].state_counts) + np.sum(self.view.agents[agent_inx].alpha))
+                action = self.env_step(agent_inx, size, lock, content, self.view.shortest_path_len(receiver, v))
+                #print ("ACTION TO PERFORM", agent_inx, action)
+                if action[0] == 1:
+                    #TODO run another policy network to find out what content to remove
+                    #By default it will use the LRU policy
+                    #rewards = add frequency count of cached content and subtract of evicted content + reward is delay between this cache
+                    #and receiver
+                    if len(action) == 2:
+                        evicted = action[1]
+                        self.controller.remove_content(evicted, inx)
+                    else:
+                        evicted = None
+                    self.controller.put_content(v, inx)
+                    self.view.agents[agent_inx].rewards += self.view.agents[agent_inx].requests.count(content)
+                    self.view.agents[agent_inx].rewards -= self.view.shortest_path_len(receiver, v)
+                    if evicted is not None:
+                        self.view.agents[agent_inx].rewards -= self.view.agents[agent_inx].requests.count(evicted)
+                        #print ("EVICTED ", evicted, " COUNT ", self.view.agents[agent_inx].requests.count(evicted))
+                        self.view.agents[agent_inx].policy2.rewards.append(self.view.agents[agent_inx].rewards)
+                else:
+                    #rewards = delay from content loc to receiver
+                    self.view.agents[agent_inx].rewards -= min_delay
+                #TODO - find how to give rewards
+                self.view.agents[agent_inx].policy.rewards.append(self.view.agents[agent_inx].rewards)
+                self.view.agents[agent_inx].rewards = 0
+                if self.view.agents[agent_inx].count % 100 == 0:
+                    self.view.agents[agent_inx].update()
+                if self.view.agents[agent_inx].count2 % 50 == 0 and len(self.view.agents[agent_inx].policy2.saved_actions) != 0:
+                    self.view.agents[agent_inx].update2()
+        # update the rewards for the episode
+        #self.view.common_rewards -= min_delay
+        lock.release()
+        
+        """
+        if count % self.view.update_freq == 0:
+            self.view.agents[i].rewards -= self.view.common_rewards
+            self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
+            self.view.agents[i].rewards *= 0
+            #print ("TYPE 2" , type(self.view.agents[agent_inx].state_counts))
+            self.view.common_rewards *= 0
+        if count % (self.view.update_freq * 5) == 0:
+            self.view.agents[i].state_counts *= 0
+            self.update_gradients(inx)
+       """ 
+        # Return content
+        #print ("Serving Node", serving_node)
+        path = list(reversed(self.view.shortest_path(receiver, serving_node)))
+        lock.acquire()
+        #print ("LOCK ACQUIRED ", inx, count)
+        self.controller.forward_content_path(serving_node, receiver, size, inx, path)
+        self.controller.end_session(inx)
+        lock.release()
+        #print ("Session End")
+
 @register_strategy('LCE')
 class LeaveCopyEverywhere(Strategy):
     """Leave Copy Everywhere (LCE) strategy.
@@ -330,29 +842,31 @@ class LeaveCopyEverywhere(Strategy):
         super(LeaveCopyEverywhere, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, size, log):
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
         # Route requests to original source and queries caches on the path
-        self.controller.start_session(time, receiver, content, log)
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
         for u, v in path_links(path):
-            self.controller.forward_request_hop(u, v)
+            self.controller.forward_request_hop(u, v, inx)
             if self.view.has_cache(v):
-                if self.controller.get_content(v):
+                if self.controller.get_content(v, inx):
                     serving_node = v
                     break
             # No cache hits, get content from source
-            self.controller.get_content(v)
+            self.controller.get_content(v, inx)
             serving_node = v
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
         for u, v in path_links(path):
-            self.controller.forward_content_hop(u, v, size)
+            self.controller.forward_content_hop(u, v, size, inx)
             if self.view.has_cache(v):
                 # insert content
-                self.controller.put_content(v)
-        self.controller.end_session()
+                self.controller.put_content(v, inx)
+        self.controller.end_session(inx)
+        lock.release()
 
 
 @register_strategy('LCD')
@@ -375,21 +889,22 @@ class LeaveCopyDown(Strategy):
         super(LeaveCopyDown, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, size, log):
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
         # Route requests to original source and queries caches on the path
-        self.controller.start_session(time, receiver, content, log)
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
         for u, v in path_links(path):
-            self.controller.forward_request_hop(u, v)
+            self.controller.forward_request_hop(u, v, inx)
             if self.view.has_cache(v):
-                if self.controller.get_content(v):
+                if self.controller.get_content(v, inx):
                     serving_node = v
                     break
         else:
             # No cache hits, get content from source
-            self.controller.get_content(v)
+            self.controller.get_content(v, inx)
             serving_node = v
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
@@ -397,11 +912,12 @@ class LeaveCopyDown(Strategy):
         # caching node
         copied = False
         for u, v in path_links(path):
-            self.controller.forward_content_hop(u, v, size)
+            self.controller.forward_content_hop(u, v, size, inx)
             if not copied and v != receiver and self.view.has_cache(v):
-                self.controller.put_content(v)
+                self.controller.put_content(v, inx)
                 copied = True
-        self.controller.end_session()
+        self.controller.end_session(inx)
+        lock.release()
 
 
 @register_strategy('PROB_CACHE')
@@ -435,23 +951,24 @@ class ProbCache(Strategy):
         self.cache_size = view.cache_nodes(size=True)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, size, log):
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
         # Route requests to original source and queries caches on the path
-        self.controller.start_session(time, receiver, content, log)
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
         for hop in range(1, len(path)):
             u = path[hop - 1]
             v = path[hop]
-            self.controller.forward_request_hop(u, v)
+            self.controller.forward_request_hop(u, v, inx)
             if self.view.has_cache(v):
-                if self.controller.get_content(v):
+                if self.controller.get_content(v, inx):
                     serving_node = v
                     break
         else:
             # No cache hits, get content from source
-            self.controller.get_content(v)
+            self.controller.get_content(v, inx)
             serving_node = v
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
@@ -464,14 +981,15 @@ class ProbCache(Strategy):
                      if n in self.cache_size])
             if v in self.cache_size:
                 x += 1
-            self.controller.forward_content_hop(u, v, size)
+            self.controller.forward_content_hop(u, v, size, inx)
             if v != receiver and v in self.cache_size:
                 # The (x/c) factor raised to the power of "c" according to the
                 # extended version of ProbCache published in IEEE TPDS
                 prob_cache = float(N) / (self.t_tw * self.cache_size[v]) * (x / c) ** c
                 if random.random() < prob_cache:
-                    self.controller.put_content(v)
-        self.controller.end_session()
+                    self.controller.put_content(v, inx)
+        self.controller.end_session(inx)
+        lock.release()
 
 
 @register_strategy('CL4M')
@@ -502,21 +1020,22 @@ class CacheLessForMore(Strategy):
             self.betw = nx.betweenness_centrality(topology)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, size, log):
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
         # Route requests to original source and queries caches on the path
-        self.controller.start_session(time, receiver, content, log)
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
         for u, v in path_links(path):
-            self.controller.forward_request_hop(u, v)
+            self.controller.forward_request_hop(u, v, inx)
             if self.view.has_cache(v):
-                if self.controller.get_content(v):
+                if self.controller.get_content(v, inx):
                     serving_node = v
                     break
         # No cache hits, get content from source
         else:
-            self.controller.get_content(v)
+            self.controller.get_content(v, inx)
             serving_node = v
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
@@ -532,10 +1051,11 @@ class CacheLessForMore(Strategy):
                     designated_cache = v
         # Forward content
         for u, v in path_links(path):
-            self.controller.forward_content_hop(u, v, size)
+            self.controller.forward_content_hop(u, v, size, inx)
             if v == designated_cache:
-                self.controller.put_content(v)
-        self.controller.end_session()
+                self.controller.put_content(v, inx)
+        self.controller.end_session(inx)
+        lock.release()
 
 
 @register_strategy('RAND_BERNOULLI')
@@ -552,30 +1072,32 @@ class RandomBernoulli(Strategy):
         self.p = p
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, size, log):
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
         # Route requests to original source and queries caches on the path
-        self.controller.start_session(time, receiver, content, log)
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
         for u, v in path_links(path):
-            self.controller.forward_request_hop(u, v)
+            self.controller.forward_request_hop(u, v, inx)
             if self.view.has_cache(v):
-                if self.controller.get_content(v):
+                if self.controller.get_content(v, inx):
                     serving_node = v
                     break
         else:
             # No cache hits, get content from source
-            self.controller.get_content(v)
+            self.controller.get_content(v, inx)
             serving_node = v
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
         for u, v in path_links(path):
-            self.controller.forward_content_hop(u, v, size)
+            self.controller.forward_content_hop(u, v, size, inx)
             if v != receiver and self.view.has_cache(v):
                 if random.random() < self.p:
-                    self.controller.put_content(v)
-        self.controller.end_session()
+                    self.controller.put_content(v, inx)
+        self.controller.end_session(inx)
+        lock.release()
 
 
 @register_strategy('RAND_CHOICE')
@@ -591,28 +1113,30 @@ class RandomChoice(Strategy):
         super(RandomChoice, self).__init__(view, controller)
 
     @inheritdoc(Strategy)
-    def process_event(self, time, receiver, content, size, log):
+    def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
         # Route requests to original source and queries caches on the path
-        self.controller.start_session(time, receiver, content, log)
+        lock.acquire()
+        self.controller.start_session(time, receiver, content, inx, log, count)
         for u, v in path_links(path):
-            self.controller.forward_request_hop(u, v)
+            self.controller.forward_request_hop(u, v, inx)
             if self.view.has_cache(v):
-                if self.controller.get_content(v):
+                if self.controller.get_content(v, inx):
                     serving_node = v
                     break
         else:
             # No cache hits, get content from source
-            self.controller.get_content(v)
+            self.controller.get_content(v, inx)
             serving_node = v
         # Return content
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
         caches = [v for v in path[1:-1] if self.view.has_cache(v)]
         designated_cache = random.choice(caches) if len(caches) > 0 else None
         for u, v in path_links(path):
-            self.controller.forward_content_hop(u, v, size)
+            self.controller.forward_content_hop(u, v, size, inx)
             if v == designated_cache:
-                self.controller.put_content(v)
-        self.controller.end_session()
+                self.controller.put_content(v, inx)
+        self.controller.end_session(inx)
+        lock.release()

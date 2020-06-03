@@ -6,7 +6,7 @@ user-provided settings.
 from __future__ import division
 import time
 import collections
-import multiprocessing as mp
+import torch.multiprocessing as mp
 import logging
 import copy
 import sys
@@ -23,7 +23,7 @@ from itertools import islice, takewhile, repeat
 
 __all__ = ['Orchestrator', 'run_scenario']
 
-
+mp.set_start_method('spawn', force=True)
 logger = logging.getLogger('orchestration')
 
 
@@ -53,7 +53,7 @@ class Orchestrator(object):
         self.n_fail = 0
         self.summary_freq = summary_freq
         self._stop = False
-        if self.settings.PARALLEL_EXECUTION:
+        if self.settings.PARALLEL_EXECUTION_RUNS or self.settings.PARALLEL_EXECUTION:
             self.pool = mp.Pool(settings.N_PROCESSES)
 
     def stop(self):
@@ -61,7 +61,7 @@ class Orchestrator(object):
         """
         logger.info('Orchestrator is stopping')
         self._stop = True
-        if self.settings.PARALLEL_EXECUTION:
+        if self.settings.PARALLEL_EXECUTION_RUNS or self.settings.PARALLEL_EXECUTION:
             self.pool.terminate()
             self.pool.join()
 
@@ -118,7 +118,7 @@ class Orchestrator(object):
                 workload_len = sum(1 for _ in iter(workload_obj))
                 requests = list(split_every(int(workload_len/cpus), iter(workload_obj)))
                 for req in requests:
-                    print ("REQ : ", req)
+                    #print ("REQ : ", req)
                     job_queue.append(self.pool.apply_async(run_scenario,
                             args=(self.settings, experiment,
                                   self.seq.assign(), self.n_exp, req),
@@ -296,7 +296,8 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
             # Cache budget is the cumulative number of cache entries across
             # the whole network (multiply by 5 as its average between 1 to 10 for different 
             # size contents
-            cachepl_spec['cache_budget'] = workload.n_contents * 5 * network_cache
+            #cachepl_spec['cache_budget'] = workload.n_contents * 5 * network_cache
+            cachepl_spec['cache_budget'] = workload.n_contents * network_cache
             print ("CACHE BUDGET : ", cachepl_spec)
             CACHE_PLACEMENT[cachepl_name](topology, **cachepl_spec)
 
@@ -337,9 +338,18 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
             return None
 
         collectors = {m: {} for m in metrics}
+        
+        nnp = dict()
+        if strategy['name'] == 'RL_DEC_1':
+            nnp['comb'] = 1
+        if 'nnp' in tree:
+            nnp['window'] = tree['nnp']['window']
+            nnp['lr'] = tree['nnp']['lr']
+            nnp['gamma'] = tree['nnp']['gamma']
+            nnp['update_freq'] = tree['nnp']['update_freq']
 
         logger.info('Experiment %d/%d | Start simulation', curr_exp, n_exp)
-        results = exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors)
+        results = exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp)
 
         duration = time.time() - start_time
         logger.info('Experiment %d/%d | End simulation | Duration %s.',

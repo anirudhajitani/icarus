@@ -339,7 +339,7 @@ class Agent(object):
 
         Training code. Calculates actor and critic loss and performn backpropogation.
         """
-        print ("UPDATE FN")
+        #print ("UPDATE FN")
         R = 0
         saved_actions = self.policy.saved_actions
         policy_losses = [] # list to save actor (policy) loss
@@ -486,9 +486,18 @@ class NetworkView(object):
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
             self.agents.append(Agent(self, r, 0,  nnp['gamma'], nnp['lr'], nnp['window']))
-        if strategy_name == 'RL_DEC_1':
+        if strategy_name in ['RL_DEC_1']:
             self.agents_per_thread = int(len(self.agents)/cpus)
             self.extra_agents = len(self.agents) % cpus
+        if strategy_name in ['INDEX']:
+            if 'index_threshold_f' not in nnp:
+                nnp['index_threshold_f'] = 10
+            self.threshold = nnp['index_threshold_f']
+        if strategy_name in ['INDEX_DIST']:
+            if 'index_threshold_d' not in nnp:
+                nnp['index_threshold_d'] = 0.5
+            self.threshold = nnp['index_threshold_d']
+
             #print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
     """
     def env_step():

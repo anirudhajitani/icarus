@@ -116,6 +116,9 @@ default['topology']['delay'] = 30
 default['nnp']['window'] = 200
 default['nnp']['lr'] = 0.01
 default['nnp']['gamma'] = 0.9
+default['nnp']['index_threshold_f'] = default['topology']['delay']
+default['nnp']['index_threshold_d'] = (default['topology']['delay'] / N_CONTENTS) * 2
+
 
 TOPOLOGIES = ['TREE']
 # Create experiments multiplexing all desired parameters

@@ -140,6 +140,7 @@ class Index(Strategy):
    
     def compute_index(self, agent_inx, content, v, threshold):
         curr_len = 0
+        #print ("THRESHOLD = ", threshold)
         #print ("AGENT, Indexes Before: ", agent_inx, self.view.agents[agent_inx].indexes)
         for k, val in self.view.agents[agent_inx].indexes.items():
             curr_len += self.view.model.workload.contents_len[k-1]
@@ -224,7 +225,7 @@ class Index(Strategy):
                 if cont_status == True:
                     continue
                 self.update_indexes(agent_inx, v, self.view.agents[agent_inx].requests)
-                ret = self.compute_index(agent_inx, content, v, 10)
+                ret = self.compute_index(agent_inx, content, v, self.view.threshold)
                 if ret[0] == -1:
                     self.controller.put_content(v, inx)
                 elif ret[0] != -2:
@@ -258,6 +259,7 @@ class IndexDist(Strategy):
         super(IndexDist, self).__init__(view, controller)
    
     def compute_index(self, agent_inx, content, v, threshold):
+        print ("THRESHOLD = ", threshold)
         curr_len = 0
         #print ("AGENT, Indexes Before: ", agent_inx, self.view.agents[agent_inx].indexes)
         for k, val in self.view.agents[agent_inx].indexes.items():
@@ -348,7 +350,7 @@ class IndexDist(Strategy):
                                                     / (np.sum(self.view.agents[agent_inx].state_counts) + np.sum(self.view.agents[agent_inx].alpha))
                 self.update_indexes(agent_inx, v)
                 #print ("PROBABILITY", agent_inx, self.view.agents[agent_inx].prob)
-                ret = self.compute_index(agent_inx, content, v, 1)
+                ret = self.compute_index(agent_inx, content, v, self.view.threshold)
                 if ret[0] == -1:
                     self.controller.put_content(v, inx)
                 elif ret[0] != -2:

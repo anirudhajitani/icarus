@@ -66,6 +66,13 @@ experiment['workload'] = {
          'rate':       1
                        }
 
+# NN Parameters
+experiment['nnp']['window'] = 200
+experiment['nnp']['lr'] = 0.01
+experiment['nnp']['gamma'] = 0.9
+experiment['nnp']['index_threshold_f'] = experiment['topology']['delay']
+#experiment['nnp']['index_threshold_d'] = (experiment['topology']['delay'] / experiment['workload']['n_contents']) * 2
+
 # Set cache placement
 experiment['cache_placement']['name'] = 'UNIFORM'
 experiment['cache_placement']['network_cache'] = 0.1
@@ -77,7 +84,7 @@ experiment['content_placement']['name'] = 'UNIFORM'
 experiment['cache_policy']['name'] = 'IN_CACHE_LFU'
 
 # Set caching meta-policy
-experiment['strategy']['name'] = 'RL_DEC_1'
+experiment['strategy']['name'] = 'INDEX_DIST'
 
 # Description of the experiment
 experiment['desc'] = "Line topology with 10 nodes"

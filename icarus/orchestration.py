@@ -347,10 +347,18 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
         if strategy['name'] == 'RL_DEC_1':
             nnp['comb'] = 1
         if 'nnp' in tree:
-            nnp['window'] = tree['nnp']['window']
-            nnp['lr'] = tree['nnp']['lr']
-            nnp['gamma'] = tree['nnp']['gamma']
-            nnp['update_freq'] = tree['nnp']['update_freq']
+            if 'window' in tree['nnp']:
+                nnp['window'] = tree['nnp']['window']
+            if 'lr' in tree['nnp']:
+                nnp['lr'] = tree['nnp']['lr']
+            if 'gamma' in tree['nnp']:
+                nnp['gamma'] = tree['nnp']['gamma']
+            if 'update_freq' in tree['nnp']:
+                nnp['update_freq'] = tree['nnp']['update_freq']
+            if 'index_threshold_f' in tree['nnp']:
+                nnp['index_threshold_f'] = tree['nnp']['index_threshold_f']
+            if 'index_threshold_d' in tree['nnp']:
+                nnp['index_threshold_d'] = tree['nnp']['index_threshold_d']
 
         logger.info('Experiment %d/%d | Start simulation', curr_exp, n_exp)
         results = exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp, settings.N_REPLICATIONS)

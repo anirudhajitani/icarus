@@ -228,6 +228,52 @@ def plot_latency_vs_cache_size(resultset, topology, alpha, cache_size_range, str
                % (topology, alpha), plotdir)
 
 
+def plot_path_stretch_vs_alpha(resultset, topology, cache_size, alpha_range, strategies, plotdir):
+    if 'NO_CACHE' in strategies:
+        strategies.remove('NO_CACHE')
+    desc = {}
+    desc['title'] = 'Path Stretch Mean: T=%s C=%s' % (topology, cache_size)
+    desc['ylabel'] = 'Path Stretch Mean'
+    desc['xlabel'] = u'Content distribution \u03b1'
+    desc['xparam'] = ('workload', 'alpha')
+    desc['xvals'] = alpha_range
+    desc['filter'] = {'topology': {'name': topology},
+                      'cache_placement': {'network_cache': cache_size}}
+    desc['ymetrics'] = [('PATH_STRETCH', 'MEAN')] * len(strategies)
+    desc['ycondnames'] = [('strategy', 'name')] * len(strategies)
+    desc['ycondvals'] = strategies
+    desc['errorbar'] = True
+    desc['legend_loc'] = 'upper left'
+    desc['line_style'] = STRATEGY_STYLE
+    desc['legend'] = STRATEGY_LEGEND
+    desc['plotempty'] = PLOT_EMPTY_GRAPHS
+    plot_lines(resultset, desc, 'PATH_STRETCH__MEAN_T=%s@C=%s.pdf'
+               % (topology, cache_size), plotdir)
+
+
+def plot_path_stretch_vs_cache_size(resultset, topology, alpha, cache_size_range, strategies, plotdir):
+    desc = {}
+    if 'NO_CACHE' in strategies:
+        strategies.remove('NO_CACHE')
+    desc['title'] = 'Path Stretch Mean: T=%s A=%s' % (topology, alpha)
+    desc['xlabel'] = u'Cache to population ratio'
+    desc['ylabel'] = 'Path Stretch Mean'
+    desc['xscale'] = 'log'
+    desc['xparam'] = ('cache_placement', 'network_cache')
+    desc['xvals'] = cache_size_range
+    desc['filter'] = {'topology': {'name': topology},
+                      'workload': {'name': 'STATIONARY', 'alpha': alpha}}
+    desc['ymetrics'] = [('PATH_STRETCH', 'MEAN')] * len(strategies)
+    desc['ycondnames'] = [('strategy', 'name')] * len(strategies)
+    desc['ycondvals'] = strategies
+    desc['errorbar'] = True
+    desc['legend_loc'] = 'upper left'
+    desc['line_style'] = STRATEGY_STYLE
+    desc['legend'] = STRATEGY_LEGEND
+    desc['plotempty'] = PLOT_EMPTY_GRAPHS
+    plot_lines(resultset, desc, 'PATH_STRETCH_MEAN_T=%s@A=%s.pdf'
+               % (topology, alpha), plotdir)
+
 def plot_cache_hits_vs_topology(resultset, alpha, cache_size, topology_range, strategies, plotdir):
     """
     Plot bar graphs of cache hit ratio for specific values of alpha and cache
@@ -258,6 +304,35 @@ def plot_cache_hits_vs_topology(resultset, alpha, cache_size, topology_range, st
                    % (alpha, cache_size), plotdir)
 
 
+def plot_path_stretch_vs_topology(resultset, alpha, cache_size, topology_range, strategies, plotdir):
+    """
+    Plot bar graphs of path stretch mean for specific values of alpha and cache
+    size for various topologies.
+
+    The objective here is to show that our algorithms works well on all
+    topologies considered
+    """
+    if 'NO_CACHE' in strategies:
+        strategies.remove('NO_CACHE')
+    desc = {}
+    desc['title'] = 'Path Stretch Mean: A=%s C=%s' % (alpha, cache_size)
+    desc['ylabel'] = 'Path Stretch Mean'
+    desc['xparam'] = ('topology', 'name')
+    desc['xvals'] = topology_range
+    desc['filter'] = {'cache_placement': {'network_cache': cache_size},
+                      'workload': {'name': 'STATIONARY', 'alpha': alpha}}
+    desc['ymetrics'] = [('PATH_STRETCH', 'MEAN')] * len(strategies)
+    desc['ycondnames'] = [('strategy', 'name')] * len(strategies)
+    desc['ycondvals'] = strategies
+    desc['errorbar'] = True
+    desc['legend_loc'] = 'lower right'
+    desc['bar_color'] = STRATEGY_BAR_COLOR
+    desc['bar_hatch'] = STRATEGY_BAR_HATCH
+    desc['legend'] = STRATEGY_LEGEND
+    desc['plotempty'] = PLOT_EMPTY_GRAPHS
+    plot_bar_chart(resultset, desc, 'PATH_STRETCH_MEAN_A=%s_C=%s.pdf'
+                   % (alpha, cache_size), plotdir)
+
 def plot_link_load_vs_topology(resultset, alpha, cache_size, topology_range, strategies, plotdir):
     """
     Plot bar graphs of link load for specific values of alpha and cache
@@ -285,6 +360,32 @@ def plot_link_load_vs_topology(resultset, alpha, cache_size, topology_range, str
     plot_bar_chart(resultset, desc, 'LINK_LOAD_INTERNAL_A=%s_C=%s.pdf'
                    % (alpha, cache_size), plotdir)
 
+def plot_latency_vs_topology(resultset, alpha, cache_size, topology_range, strategies, plotdir):
+    """
+    Plot bar graphs of Latency for specific values of alpha and cache
+    size for various topologies.
+
+    The objective here is to show that our algorithms works well on all
+    topologies considered
+    """
+    desc = {}
+    desc['title'] = 'Latency: A=%s C=%s' % (alpha, cache_size)
+    desc['ylabel'] = 'Latency(ms)'
+    desc['xparam'] = ('topology', 'name')
+    desc['xvals'] = topology_range
+    desc['filter'] = {'cache_placement': {'network_cache': cache_size},
+                      'workload': {'name': 'STATIONARY', 'alpha': alpha}}
+    desc['ymetrics'] = [('LATENCY', 'MEAN')] * len(strategies)
+    desc['ycondnames'] = [('strategy', 'name')] * len(strategies)
+    desc['ycondvals'] = strategies
+    desc['errorbar'] = True
+    desc['legend_loc'] = 'lower right'
+    desc['bar_color'] = STRATEGY_BAR_COLOR
+    desc['bar_hatch'] = STRATEGY_BAR_HATCH
+    desc['legend'] = STRATEGY_LEGEND
+    desc['plotempty'] = PLOT_EMPTY_GRAPHS
+    plot_bar_chart(resultset, desc, 'LATENCY_A=%s_C=%s.pdf'
+                   % (alpha, cache_size), plotdir)
 
 def run(config, results, plotdir):
     """Run the plot script
@@ -319,6 +420,8 @@ def run(config, results, plotdir):
             plot_link_load_vs_alpha(resultset, topology, cache_size, alphas, strategies, plotdir)
             logger.info('Plotting latency for topology %s vs cache size %s' % (topology, str(cache_size)))
             plot_latency_vs_alpha(resultset, topology, cache_size, alphas, strategies, plotdir)
+            logger.info('Plotting path stretch for topology %s vs cache size %s' % (topology, str(cache_size)))
+            plot_path_stretch_vs_alpha(resultset, topology, cache_size, alphas, strategies, plotdir)
     for topology in topologies:
         for alpha in alphas:
             logger.info('Plotting cache hit ratio for topology %s and alpha %s vs cache size' % (topology, str(alpha)))
@@ -327,12 +430,18 @@ def run(config, results, plotdir):
             plot_link_load_vs_cache_size(resultset, topology, alpha, cache_sizes, strategies, plotdir)
             logger.info('Plotting latency for topology %s and alpha %s vs cache size' % (topology, str(alpha)))
             plot_latency_vs_cache_size(resultset, topology, alpha, cache_sizes, strategies, plotdir)
+            logger.info('Plotting path stretch for topology %s and alpha %s vs cache size' % (topology, str(alpha)))
+            plot_path_stretch_vs_cache_size(resultset, topology, alpha, cache_sizes, strategies, plotdir)
     for cache_size in cache_sizes:
         for alpha in alphas:
             logger.info('Plotting cache hit ratio for cache size %s vs alpha %s against topologies' % (str(cache_size), str(alpha)))
             plot_cache_hits_vs_topology(resultset, alpha, cache_size, topologies, strategies, plotdir)
             logger.info('Plotting link load for cache size %s vs alpha %s against topologies' % (str(cache_size), str(alpha)))
             plot_link_load_vs_topology(resultset, alpha, cache_size, topologies, strategies, plotdir)
+            logger.info('Plotting latency for cache size %s vs alpha %s against topologies' % (str(cache_size), str(alpha)))
+            plot_latency_vs_topology(resultset, alpha, cache_size, topologies, strategies, plotdir)
+            logger.info('Plotting path stretch for cache size %s vs alpha %s against topologies' % (str(cache_size), str(alpha)))
+            plot_path_stretch_vs_topology(resultset, alpha, cache_size, topologies, strategies, plotdir)
     logger.info('Exit. Plots were saved in directory %s' % os.path.abspath(plotdir))
 
 

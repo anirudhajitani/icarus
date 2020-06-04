@@ -324,7 +324,7 @@ class LatencyCollector(DataCollector):
     def content_hop(self, u, v, size, main_path=True):
         if main_path:
             #Multiply by size of file 
-            self.sess_latency += (size * self.view.link_delay(u, v))
+            self.sess_latency += (self.view.link_delay(u, v))
 
     @inheritdoc(DataCollector)
     def end_session(self, success=True):
@@ -509,6 +509,7 @@ class PathStretchCollector(DataCollector):
             results['CDF'] = cdf(self.stretch_data)
             results['CDF_REQUEST'] = cdf(self.req_stretch_data)
             results['CDF_CONTENT'] = cdf(self.cont_stretch_data)
+        print ("Path Stretch Sessions ", self.sess_count)
         return results
 
 

@@ -14,7 +14,7 @@ LOG_LEVEL = 'INFO'
 # If True, executes simulations in parallel using multiple processes
 # to take advantage of multicore CPUs
 PARALLEL_EXECUTION = False
-PARALLEL_EXECUTION_RUNS = False
+PARALLEL_EXECUTION_RUNS = True
 
 # Number of processes used to run simulations in parallel.
 # This option is ignored if PARALLEL_EXECUTION = False
@@ -50,10 +50,12 @@ DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD', 'PATH_STRETCH']
 # This would give problems while trying to plot the results because if for
 # example I wanted to filter experiment with alpha=0.8, experiments with
 # alpha = 0.799999999999 would not be recognized
-ALPHA = [0.6, 1.0, 1.4]
+#ALPHA = [0.6, 1.0, 1.4]
+ALPHA = [0.6, 1.0]
 
 # Total size of network cache as a fraction of content population
-NETWORK_CACHE = [0.05, 0.1, 0.5]
+#NETWORK_CACHE = [0.05, 0.1, 0.5]
+NETWORK_CACHE = [0.1, 0.5]
 
 # Number of content objects
 #N_CONTENTS = 3 * 10 ** 5
@@ -64,21 +66,24 @@ NETWORK_REQUEST_RATE = 12.0
 
 # Number of content requests generated to prepopulate the caches
 # These requests are not logged
-N_WARMUP_REQUESTS = 1 * 10 ** 5
+N_WARMUP_REQUESTS = 1 * 10 ** 3
 
 # Number of content requests generated after the warmup and logged
 # to generate results.
-N_MEASURED_REQUESTS = 6 * 10 ** 5
+N_MEASURED_REQUESTS = 6 * 10 ** 3
 
 
 # List of caching and routing strategies
 # The code is located in ./icarus/models/strategy.py
 STRATEGIES = [
      'INDEX', # Indexability Approach
-     'INDEX_DIST',
-     'RL_DEC_2F',
-     'RL_DEC_2D',
-     'LCE',  # Leave Copy Everywhere
+     #'INDEX_DIST',
+     #'RL_DEC_2F',
+     #'RL_DEC_1',
+     #'RL_DEC_2D',
+     #'LCE',  # Leave Copy Everywhere
+            ]
+"""
      'NO_CACHE',  # No caching, shorest-path routing
      'CL4M',  # Cache less for more
      'PROB_CACHE',  # ProbCache
@@ -86,7 +91,7 @@ STRATEGIES = [
      'RAND_CHOICE',  # Random choice: cache in one random cache on path
      'RAND_BERNOULLI',  # Random Bernoulli: cache randomly in caches on path
              ]
-
+"""
 # Cache replacement policy used by the network caches.
 # Supported policies are: 'LRU', 'LFU', 'FIFO', 'RAND' and 'NULL'
 # Cache policy implmentations are located in ./icarus/models/cache.py
@@ -113,11 +118,25 @@ default['topology']['k'] = 2
 default['topology']['delay'] = 30
 
 # NN Parameters
-default['nnp']['window'] = 200
-default['nnp']['lr'] = 0.01
-default['nnp']['gamma'] = 0.9
-default['nnp']['index_threshold_f'] = default['topology']['delay']
-default['nnp']['index_threshold_d'] = (default['topology']['delay'] / N_CONTENTS) * 2
+
+THR_F = default['topology']['delay']
+THR_D = (default['topology']['delay'] / N_CONTENTS) * 2
+
+HYPERPARAM_RUN = 1
+if HYPERPARAM_RUN == 1:
+    WINDOW_SIZE = [100, 500, 1000]
+    LR = [0.001, 0.01, 0.1]
+    GAMMA = [0.8, 0.9, 0.99]
+    UPDATE_FREQ = [100, 500, 1000]
+    THRESHOLD_F = [THR_F/2, THR_F, THR_F*2]
+    THRESHOLD_D = [THR_D/2, THR_D, THR_D*2]
+else:
+    default['nnp']['window'] = 200
+    default['nnp']['lr'] = 0.01
+    default['nnp']['gamma'] = 0.9
+    default['nnp']['update_freq'] = 200
+    default['nnp']['index_threshold_f'] = default['topology']['delay']
+    default['nnp']['index_threshold_d'] = (default['topology']['delay'] / N_CONTENTS) * 2
 
 
 TOPOLOGIES = ['TREE']
@@ -126,16 +145,81 @@ for alpha in ALPHA:
     for strategy in STRATEGIES:
         for topology in TOPOLOGIES:
             for network_cache in NETWORK_CACHE:
-                experiment = copy.deepcopy(default)
-                experiment['workload']['alpha'] = alpha
-                experiment['strategy']['name'] = strategy
-                experiment['topology']['name'] = topology
-                experiment['cache_placement']['network_cache'] = network_cache
-                experiment['desc'] = "Alpha: %s, strategy: %s, topology: %s, network cache: %s" \
+                if HYPERPARAM_RUN == 1:
+                    if strategy in ['INDEX']:
+                        for window in WINDOW_SIZE:
+                            for threshold in THRESHOLD_F:
+                                experiment = copy.deepcopy(default)
+                                experiment['workload']['alpha'] = alpha
+                                experiment['strategy']['name'] = strategy
+                                experiment['topology']['name'] = topology
+                                experiment['cache_placement']['network_cache'] = network_cache
+                                experiment['nnp']['window'] = window
+                                experiment['nnp']['index_threshold_f'] = threshold
+                                experiment['desc'] = "Alpha: %s, strategy: %s, topology: %s, network cache: %s, window: %s, threshold: %s" \
+                                     % (str(alpha), strategy, topology, str(network_cache), str(window), str(threshold))
+                                EXPERIMENT_QUEUE.append(experiment)
+                    elif strategy in ['INDEX_DIST']:
+                        for threshold in THRESHOLD_D:
+                            experiment = copy.deepcopy(default)
+                            experiment['workload']['alpha'] = alpha
+                            experiment['strategy']['name'] = strategy
+                            experiment['topology']['name'] = topology
+                            experiment['cache_placement']['network_cache'] = network_cache
+                            experiment['nnp']['index_threshold_d'] = threshold
+                            experiment['desc'] = "Alpha: %s, strategy: %s, topology: %s, network cache: %s, threshold: %s" \
+                                    % (str(alpha), strategy, topology, str(network_cache), str(threshold))
+                            EXPERIMENT_QUEUE.append(experiment)
+                    elif strategy in ['RL_DEC_1']:
+                        for lr in LR:
+                            for gamma in GAMMA:
+                                for update_freq in UPDATE_FREQ:
+                                    experiment = copy.deepcopy(default)
+                                    experiment['workload']['alpha'] = alpha
+                                    experiment['strategy']['name'] = strategy
+                                    experiment['topology']['name'] = topology
+                                    experiment['cache_placement']['network_cache'] = network_cache
+                                    experiment['nnp']['lr'] = lr
+                                    experiment['nnp']['gamma'] = gamma
+                                    experiment['nnp']['update_freq'] = update_freq
+                                    experiment['desc'] = "Alpha: %s, strategy: %s, topology: %s, network cache: %s, LR: %s, Gamma: %s, Update Freq: %s" \
+                                         % (str(alpha), strategy, topology, str(network_cache), str(lr), str(gamma), str(update_freq))
+                                    EXPERIMENT_QUEUE.append(experiment)
+                    elif strategy in ['RL_DEC_2D', 'RL_DEC_2F']:
+                        for lr in LR:
+                            for gamma in GAMMA:
+                                for window in WINDOW_SIZE:
+                                    experiment = copy.deepcopy(default)
+                                    experiment['workload']['alpha'] = alpha
+                                    experiment['strategy']['name'] = strategy
+                                    experiment['topology']['name'] = topology
+                                    experiment['cache_placement']['network_cache'] = network_cache
+                                    experiment['nnp']['lr'] = lr
+                                    experiment['nnp']['gamma'] = gamma
+                                    experiment['nnp']['window'] = window
+                                    experiment['desc'] = "Alpha: %s, strategy: %s, topology: %s, network cache: %s, LR: %s, Gamma: %s, window: %s" \
+                                         % (str(alpha), strategy, topology, str(network_cache), str(lr), str(gamma), str(window))
+                                    EXPERIMENT_QUEUE.append(experiment)
+                    else:
+                        experiment = copy.deepcopy(default)
+                        experiment['workload']['alpha'] = alpha
+                        experiment['strategy']['name'] = strategy
+                        experiment['topology']['name'] = topology
+                        experiment['cache_placement']['network_cache'] = network_cache
+                        experiment['desc'] = "Alpha: %s, strategy: %s, topology: %s, network cache: %s" \
                                      % (str(alpha), strategy, topology, str(network_cache))
-                EXPERIMENT_QUEUE.append(experiment)
-
-
+                        EXPERIMENT_QUEUE.append(experiment)
+                else:
+                    experiment = copy.deepcopy(default)
+                    experiment['workload']['alpha'] = alpha
+                    experiment['strategy']['name'] = strategy
+                    experiment['topology']['name'] = topology
+                    experiment['cache_placement']['network_cache'] = network_cache
+                    experiment['desc'] = "Alpha: %s, strategy: %s, topology: %s, network cache: %s" \
+                                     % (str(alpha), strategy, topology, str(network_cache))
+                    EXPERIMENT_QUEUE.append(experiment)
+#for exp in EXPERIMENT_QUEUE:
+#    print(exp)
 """
 experiment = copy.deepcopy(default)
 experiment['workload']['alpha'] = 0.7

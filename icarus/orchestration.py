@@ -12,7 +12,7 @@ import copy
 import sys
 import signal
 import traceback
-
+from pprint import pprint
 from icarus.registry import RESULTS_WRITER
 from icarus.execution import exec_experiment
 from icarus.registry import TOPOLOGY_FACTORY, CACHE_PLACEMENT, CONTENT_PLACEMENT, \
@@ -268,7 +268,6 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
 
         # Copy parameters so that they can be manipulated
         tree = copy.deepcopy(params)
-
         # Set topology
         topology_spec = tree['topology']
         topology_name = topology_spec.pop('name')
@@ -331,18 +330,7 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
 
         # Configuration parameters of network model
         netconf = tree['netconf']
-
-        # Text description of the scenario run to print on screen
-        scenario = tree['desc'] if 'desc' in tree else "Description N/A"
-
-        logger.info('Experiment %d/%d | Preparing scenario: %s', curr_exp, n_exp, scenario)
-
-        if any(m not in DATA_COLLECTOR for m in metrics):
-            logger.error('There are no implementations for at least one data collector specified')
-            return None
-
-        collectors = {m: {} for m in metrics}
-        
+ 
         nnp = dict()
         if strategy['name'] == 'RL_DEC_1':
             nnp['comb'] = 1
@@ -359,7 +347,19 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
                 nnp['index_threshold_f'] = tree['nnp']['index_threshold_f']
             if 'index_threshold_d' in tree['nnp']:
                 nnp['index_threshold_d'] = tree['nnp']['index_threshold_d']
+        
+        print ("NNP DICT", nnp)
+        
+        # Text description of the scenario run to print on screen
+        scenario = tree['desc'] if 'desc' in tree else "Description N/A"
 
+        logger.info('Experiment %d/%d | Preparing scenario: %s', curr_exp, n_exp, scenario)
+
+        if any(m not in DATA_COLLECTOR for m in metrics):
+            logger.error('There are no implementations for at least one data collector specified')
+            return None
+
+        collectors = {m: {} for m in metrics}
         logger.info('Experiment %d/%d | Start simulation', curr_exp, n_exp)
         results = exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp, settings.N_REPLICATIONS)
 

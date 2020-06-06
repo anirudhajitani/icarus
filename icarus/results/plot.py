@@ -181,6 +181,7 @@ def plot_lines(resultset, desc, filename, plotdir):
     plot_args = desc.get('plot_args', {})
     plot_empty = desc.get('plotempty', True)
     empty = True
+    #print ("Y VALS ", yvals)
     for i in range(len(yvals)):
         means = np.zeros(len(xvals))
         err = np.zeros(len(xvals))
@@ -194,17 +195,22 @@ def plot_lines(resultset, desc, filename, plotdir):
                     if v.getval(ymetrics[i]) is not None]
             confidence = desc['confidence'] if 'confidence' in desc else 0.95
             means[j], err[j] = means_confidence_interval(data, confidence)
+        #print ("ERROR", err)
         yerr = None if 'errorbar' in desc and not desc['errorbar'] or all(err == 0) else err
+        #yerr = None if 'errorbar' in desc and not desc['errorbar'] else err
         fmt = desc['line_style'][yvals[i]] if 'line_style' in desc \
               and yvals[i] in desc['line_style'] else '-'
         # This check is to prevent crashing when trying to plot arrays of nan
         # values with axes log scale
+        #print ("PLOT VAL", xvals, means, yerr)
         if all(np.isnan(x) for x in xvals) or all(np.isnan(y) for y in means):
             plt.errorbar([], [], fmt=fmt)
         else:
+            #print ("PLOT ERRORBAR")
             plt.errorbar(xvals, means, yerr=yerr, fmt=fmt, **plot_args)
             empty = False
     if empty and not plot_empty:
+        #print ("ENDED UP HERE")
         return
     x_min = desc['xmin'] if 'xmin' in desc else min(xvals)
     x_max = desc['xmax'] if 'xmax' in desc else max(xvals)

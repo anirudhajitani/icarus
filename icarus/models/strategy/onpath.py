@@ -259,7 +259,7 @@ class IndexDist(Strategy):
         super(IndexDist, self).__init__(view, controller)
    
     def compute_index(self, agent_inx, content, v, threshold):
-        print ("THRESHOLD = ", threshold)
+        #print ("THRESHOLD = ", threshold)
         curr_len = 0
         #print ("AGENT, Indexes Before: ", agent_inx, self.view.agents[agent_inx].indexes)
         for k, val in self.view.agents[agent_inx].indexes.items():

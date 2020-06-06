@@ -13,7 +13,8 @@ The `NetworkController` is also responsible to notify a `DataCollectorProxy`
 of all relevant events.
 """
 import logging
-
+import sys
+import traceback
 import networkx as nx
 import fnss
 import sys
@@ -230,22 +231,31 @@ class Agent(object):
         #state space is lib size + 1 (for the input)
 
         if self.view.strategy_name in ['RL_DEC_1']:
-            self.policy = Policy(len(self.view.model.library), len(self.valid_action))
-            #print ("POLICY", self.policy)
-            self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
-            #print ("OPTIMIZER", self.optimizer)
-            self.eps = np.finfo(np.float32).eps.item()
-            #print ("EPS", self.eps)
+            try:
+                self.policy = Policy(len(self.view.model.library), len(self.valid_action))
+                #print ("POLICY", self.policy)
+                self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
+                #print ("OPTIMIZER", self.optimizer)
+                self.eps = np.finfo(np.float32).eps.item()
+                #print ("EPS", self.eps)
+            except:
+                print(traceback.format_exc())
+                print(sys.exc_info()[2])
+
         if self.view.strategy_name in ['RL_DEC_2F', 'RL_DEC_2D']:
-            self.policy = Policy(len(self.view.model.library)*2, len(self.valid_action))
-            #print ("POLICY", self.policy)
-            self.policy2 = Policy(self.cache_size, self.cache_size)
-            self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
-            self.optimizer2 = optim.Adam(self.policy2.parameters(), lr=lr)
-            #print ("OPTIMIZER", self.optimizer)
-            self.eps = np.finfo(np.float32).eps.item()
-            self.eps2 = np.finfo(np.float32).eps.item()
-            #print ("EPS", self.eps)
+            try:
+                self.policy = Policy(len(self.view.model.library)*2, len(self.valid_action))
+                #print ("POLICY", self.policy)
+                self.policy2 = Policy(self.cache_size, self.cache_size)
+                self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
+                self.optimizer2 = optim.Adam(self.policy2.parameters(), lr=lr)
+                #print ("OPTIMIZER", self.optimizer)
+                self.eps = np.finfo(np.float32).eps.item()
+                self.eps2 = np.finfo(np.float32).eps.item()
+                #print ("EPS", self.eps)
+            except:
+                print(traceback.format_exc())
+                print(sys.exc_info()[2])
 
 
     def get_state(self):

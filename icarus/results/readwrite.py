@@ -122,6 +122,7 @@ class ResultSet(object):
         if not isinstance(results, Tree):
             results = Tree(results)
         self._results.append((parameters, results))
+        #print ("RES : ", self._results)
 
     def dump(self):
         """Dump all results in a list
@@ -207,6 +208,8 @@ class ResultSet(object):
         for parameters, results in self._results:
             parameters = Tree(parameters)
             if parameters.match(condition):
+                #print ("CONDITION: ", condition)
+                #print ("PARAMS: ", parameters)
                 filtered_resultset.add(parameters, results)
         return filtered_resultset
 

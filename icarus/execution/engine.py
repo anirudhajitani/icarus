@@ -9,7 +9,7 @@ from icarus.execution import NetworkModel, NetworkView, NetworkController, Colle
 from icarus.registry import DATA_COLLECTOR, STRATEGY
 from pprint import pprint
 from itertools import islice, takewhile, repeat
-import multiprocessing as mp
+import torch.multiprocessing as mp
 import threading as th
 import sys
 
@@ -68,8 +68,9 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     strategy_name = strategy['name']
     model = NetworkModel(topology, workload, cache_policy, **netconf)
     view = NetworkView(model, cpus, nnp, strategy_name)
+    print ("Network View Done")
     controller = NetworkController(model, cpus)
-    print ("Network Done")
+    print ("Network Controller Done")
     collectors_inst = [DATA_COLLECTOR[name](view, **params)
                        for name, params in collectors.items()]
     collector = CollectorProxy(view, collectors_inst)
@@ -92,6 +93,7 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     lock = th.Lock()
     barrier = th.Barrier(cpus)
     jobs = []
+    #print ("BEFORE THREAD CALL")
     #if sys.version_info > (3, 2):
     #    callbacks["error_callback"] = error_callback
     for inx, req in enumerate(requests):

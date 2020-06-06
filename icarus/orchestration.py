@@ -13,7 +13,7 @@ import sys
 import signal
 import traceback
 from pprint import pprint
-from icarus.registry import RESULTS_WRITER
+from icarus.registry import RESULTS_WRITER, RESULTS_READER
 from icarus.execution import exec_experiment
 from icarus.registry import TOPOLOGY_FACTORY, CACHE_PLACEMENT, CONTENT_PLACEMENT, \
                             CACHE_POLICY, WORKLOAD, DATA_COLLECTOR, STRATEGY
@@ -157,7 +157,18 @@ class Orchestrator(object):
             # Schedule experiments from the queue
             while queue:
                 experiment = queue.popleft()
-                for _ in range(self.settings.N_REPLICATIONS):
+                runs = self.settings.N_REPLICATIONS
+                if self.settings.RESULTS_RESUME == 1:
+                    res_op = RESULTS_READER[self.settings.RESULTS_FORMAT](self.output)
+                    pprint (vars(res_op))
+                    for res in res_op:
+                        self.results.add(res[0], res[1])
+                    filter_res = res_op.filter(experiment)
+                    #pprint (vars(filter_res))
+                    if len(filter_res._results) == self.settings.N_REPLICATIONS:
+                        print ("EXPERIMENT ALREADY IN RESULTS")
+                    runs = self.settings.N_REPLICATIONS - len(filter_res._results)
+                for _ in range(runs):
                     job_queue.append(self.pool.apply_async(run_scenario,
                             args=(self.settings, experiment,
                                   self.seq.assign(), self.n_exp),
@@ -181,7 +192,18 @@ class Orchestrator(object):
         else:  # Single-process execution
             while queue:
                 experiment = queue.popleft()
-                for _ in range(self.settings.N_REPLICATIONS):
+                runs = self.settings.N_REPLICATIONS
+                if self.settings.RESULTS_RESUME == 1:
+                    res_op = RESULTS_READER[self.settings.RESULTS_FORMAT](self.output)
+                    #pprint (vars(res_op))
+                    for res in res_op:
+                        self.results.add(res[0], res[1])
+                    filter_res = res_op.filter(experiment)
+                    #pprint (vars(filter_res))
+                    if len(filter_res._results) == self.settings.N_REPLICATIONS:
+                        print ("EXPERIMENT ALREADY IN RESULTS")
+                    runs = self.settings.N_REPLICATIONS - len(filter_res._results)
+                for _ in range(runs):
                     self.experiment_callback(run_scenario(self.settings,
                                             experiment, self.seq.assign(),
                                             self.n_exp))

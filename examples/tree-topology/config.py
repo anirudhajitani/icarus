@@ -28,7 +28,7 @@ CACHING_GRANULARITY = 'OBJECT'
 # Result readers and writers are located in module ./icarus/results/readwrite.py
 # Currently only PICKLE is supported
 RESULTS_FORMAT = 'PICKLE'
-
+RESULTS_RESUME = 1
 # Number of times each experiment is replicated
 # This is necessary for extracting confidence interval of selected metrics
 N_REPLICATIONS = 2
@@ -77,7 +77,7 @@ N_MEASURED_REQUESTS = 6 * 10 ** 3
 # The code is located in ./icarus/models/strategy.py
 STRATEGIES = [
      'INDEX', # Indexability Approach
-     #'INDEX_DIST',
+     'INDEX_DIST',
      #'RL_DEC_2F',
      #'RL_DEC_1',
      #'RL_DEC_2D',

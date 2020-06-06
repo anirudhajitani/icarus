@@ -13,14 +13,14 @@ LOG_LEVEL = 'INFO'
 # If True, executes simulations in parallel using multiple processes
 # to take advantage of multicore CPUs
 PARALLEL_EXECUTION = False
-PARALLEL_EXECUTION_RUNS = True
+PARALLEL_EXECUTION_RUNS = False
 
 # Number of processes used to run simulations in parallel.
 # This option is ignored if PARALLEL_EXECUTION = False
 N_PROCESSES = cpu_count()
 
 # Number of times each experiment is replicated
-N_REPLICATIONS = 2
+N_REPLICATIONS = 3
 
 # Granularity of caching.
 # Currently, only OBJECT is supported
@@ -30,7 +30,7 @@ CACHING_GRANULARITY = 'OBJECT'
 # Result readers and writers are located in module ./icarus/results/readwrite.py
 # Currently only PICKLE is supported
 RESULTS_FORMAT = 'PICKLE'
-
+RESULTS_RESUME = 1
 # List of metrics to be measured in the experiments
 # The implementation of data collectors are located in ./icarus/execution/collectors.py
 DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD', 'PATH_STRETCH']
@@ -60,8 +60,8 @@ experiment['topology']['asn'] = 1221
 experiment['workload'] = {
          'name':       'STATIONARY',
          'n_contents': 20,
-         'n_warmup':   10 ** 5,
-         'n_measured': 5 * 10 ** 5,
+         'n_warmup':   10 ** 2,
+         'n_measured': 5 * 10 ** 2,
          'alpha':      1.0,
          'rate':       1
                        }

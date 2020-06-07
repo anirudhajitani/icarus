@@ -13,7 +13,7 @@ LOG_LEVEL = 'INFO'
 # If True, executes simulations in parallel using multiple processes
 # to take advantage of multicore CPUs
 PARALLEL_EXECUTION = False
-PARALLEL_EXECUTION_RUNS = False
+PARALLEL_EXECUTION_RUNS = True
 
 # Number of processes used to run simulations in parallel.
 # This option is ignored if PARALLEL_EXECUTION = False
@@ -60,8 +60,8 @@ experiment['topology']['asn'] = 1221
 experiment['workload'] = {
          'name':       'STATIONARY',
          'n_contents': 200,
-         'n_warmup':   10 ** 7,
-         'n_measured': 5 * 10 ** 7,
+         'n_warmup':   10 ** 5,
+         'n_measured': 5 * 10 ** 5,
          'alpha':      1.0,
          'rate':       12.0
                        }
@@ -84,7 +84,8 @@ experiment['content_placement']['name'] = 'UNIFORM'
 experiment['cache_policy']['name'] = 'IN_CACHE_LFU'
 
 # Set caching meta-policy
-experiment['strategy']['name'] = 'RL_DEC_2F'
+experiment['strategy']['name'] = 'RL_DEC_1'
+#experiment['strategy']['name'] = 'LCE'
 
 # Description of the experiment
 experiment['desc'] = "Line topology with 10 nodes"

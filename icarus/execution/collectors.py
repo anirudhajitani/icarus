@@ -267,15 +267,19 @@ class LinkLoadCollector(DataCollector):
     def results(self):
         duration = self.t_end - self.t_start
         used_links = set(self.req_count.keys()).union(set(self.cont_count.keys()))
+        print ("USED LINKS ", used_links)
         link_loads = {link: (self.req_size * self.req_count[link] +
                              self.content_size * self.cont_count[link]) / duration
                       for link in used_links}
+        print ("LINK LOADS ", link_loads)
         link_loads_int = {link: load
                           for link, load in link_loads.items()
                           if self.view.link_type(*link) == 'internal'}
+        print ("LINK LOADS_INT ", link_loads_int)
         link_loads_ext = {link: load
                           for link, load in link_loads.items()
                           if self.view.link_type(*link) == 'external'}
+        print ("LINK LOADS_EXT ", link_loads_int)
         mean_load_int = sum(link_loads_int.values()) / len(link_loads_int) \
                         if len(link_loads_int) > 0 else 0
         mean_load_ext = sum(link_loads_ext.values()) / len(link_loads_ext) \

@@ -199,7 +199,7 @@ class Index(Strategy):
         lock.release()
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
-        min_delay = sys.maxsize
+        min_delay = self.view.shortest_path_len(source, receiver)
         #print ("Min Delay ", min_delay) 
         # Finding the path with the minimum delay in the network
         serving_node = source
@@ -319,7 +319,7 @@ class IndexDist(Strategy):
         lock.release()
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
-        min_delay = sys.maxsize
+        min_delay = self.view.shortest_path_len(source, receiver)
         #print ("Min Delay ", min_delay) 
         # Finding the path with the minimum delay in the network
         serving_node = source
@@ -422,7 +422,7 @@ class RlDec1(Strategy):
             self.view.agents[i].update()
 
 
-    def perform_action(self,action, cache, size, inx, lock):
+    def perform_action(self, action, cache, size, inx, lock):
         """
         Decode the actions provided by the policy network
         Cache files according to the action selected
@@ -436,6 +436,8 @@ class RlDec1(Strategy):
         add_contents = []
         remove_contents = []
         existing_contents = self.view.cache_dump(cache)
+        #print ("EXISTING CONTENTS", existing_contents)
+        #print ("Action", action)
         for a in range(action.size):
             if action[a] == 1:
                 #here get_content called without content so cache hit/miss can be computed,
@@ -455,12 +457,13 @@ class RlDec1(Strategy):
         for ac in add_contents:
             # Get location of all nodes that has the content stored
             content_loc = self.view.content_locations(ac)
-            min_delay = sys.maxsize
             delay = 0
             serving_node = self.view.content_source(ac)
+            min_delay = self.view.shortest_path_len(cache, serving_node)
             # Finding the path with the minimum delay in the network
             for c in content_loc :
                 delay = self.view.shortest_path_len(cache, c)
+                #print ("Delay : ", cache, " , ", c, " : ", delay) 
                 if delay < min_delay:
                     min_delay = delay
                     serving_node = c
@@ -474,7 +477,7 @@ class RlDec1(Strategy):
             #print ("DELAY IN FETCHING", min_delay)
             path = list(reversed(self.view.shortest_path(cache, serving_node)))
             self.controller.forward_content_path(serving_node, cache, size, inx, path)
-            self.controller.put_content(cache, ac, inx)
+            self.controller.put_content(cache, inx, ac)
         lock.release()
         #print ("CACHE DUMP ", cache, " = ", self.view.cache_dump(cache))
         return rew
@@ -492,6 +495,7 @@ class RlDec1(Strategy):
         lock.acquire()
         self.controller.start_session(time, receiver, content, inx, log, count)
         self.view.count += 1
+        print ("COUNT ", self.view.count)
         lock.release()
         #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:
@@ -499,7 +503,8 @@ class RlDec1(Strategy):
             self.env_step(size, inx, lock) 
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
-        min_delay = sys.maxsize
+        #print ("Content Loc: ", content_loc, content)
+        min_delay = self.view.shortest_path_len(source, receiver)
         #print ("Min Delay ", min_delay) 
         # Finding the path with the minimum delay in the network
         serving_node = source
@@ -515,29 +520,41 @@ class RlDec1(Strategy):
         lock.acquire()
         for u, v in path_links(min_path):
             #Need to get rid of inx for indexability
-            self.controller.forward_request_hop(u, v, inx)
-            cont_status = self.controller.get_content(v, inx)
             if v in self.view.model.routers:
                 agent_inx = self.view.model.routers.index(v)
                 #print ("TYPE" , type(self.view.agents[agent_inx].state_counts))
+                if len(self.view.agents[agent_inx].requests) == self.view.window:
+                    rem = self.view.agents[agent_inx].requests.popleft()
+                    self.view.agents[agent_inx].state_counts[rem-1] -= 1
+                #get state_2 (need to reset after window size)
                 self.view.agents[agent_inx].state_counts[content-1] += 1
+                self.view.agents[agent_inx].requests.append(content)
+            self.controller.forward_request_hop(u, v, inx)
+            cont_status = self.controller.get_content(v, inx)
         # update the rewards for the episode
         self.view.common_rewards -= min_delay
+        #print ("COMMON REW", min_delay, self.view.common_rewards)
         lock.release()
         
         if count % self.view.update_freq == 0:
             barrier.wait() 
             start, end = self.get_agent_indexes(inx)
             for i in range(start,end):
-                self.view.agents[i].rewards -= self.view.common_rewards
-                self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
+                self.view.agents[i].rewards += self.view.common_rewards
+                if self.view.agents[i].state_ver == 1:
+                    self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
+                else:
+                    for x in range(self.view.agents[i].cache_size):
+                        #print ("APPEND REWARDS ", self.view.agents[i].rewards, " I= ", i)
+                        self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
                 self.view.agents[i].rewards *= 0
                 #print ("TYPE 2" , type(self.view.agents[agent_inx].state_counts))
+            barrier.wait()
             self.view.common_rewards *= 0
             barrier.wait()
-        
+
         if count % (self.view.update_freq * 5) == 0:
-            self.view.agents[i].state_counts *= 0
+            #self.view.agents[i].state_counts *= 0
             self.update_gradients(inx)
         # Return content
         #print ("Serving Node", serving_node)
@@ -596,6 +613,7 @@ class RlDec2F(Strategy):
         lock.acquire()
         self.controller.start_session(time, receiver, content, inx, log, count)
         self.view.count += 1
+        print ("COUNT ", self.view.count)
         lock.release()
         #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:
@@ -603,7 +621,7 @@ class RlDec2F(Strategy):
         #    self.env_step(size, inx, lock) 
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
-        min_delay = sys.maxsize
+        min_delay = self.view.shortest_path_len(source, receiver)
         #print ("Min Delay ", min_delay) 
         # Finding the path with the minimum delay in the network
         serving_node = source
@@ -657,6 +675,7 @@ class RlDec2F(Strategy):
                     #rewards = delay from content loc to receiver
                     self.view.agents[agent_inx].rewards -= min_delay
                 #TODO - find how to give rewards
+                #print("REWARDS : ", self.view.agents[agent_inx].rewards, agent_inx)
                 self.view.agents[agent_inx].policy.rewards.append(self.view.agents[agent_inx].rewards)
                 self.view.agents[agent_inx].rewards = 0
                 if self.view.agents[agent_inx].count % 100 == 0:
@@ -735,6 +754,7 @@ class RlDec2D(Strategy):
         lock.acquire()
         self.controller.start_session(time, receiver, content, inx, log, count)
         self.view.count += 1
+        print ("COUNT ", self.view.count)
         lock.release()
         #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:
@@ -742,7 +762,7 @@ class RlDec2D(Strategy):
         #    self.env_step(size, inx, lock) 
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
-        min_delay = sys.maxsize
+        min_delay = self.view.shortest_path_len(source, receiver)
         #print ("Min Delay ", min_delay) 
         # Finding the path with the minimum delay in the network
         serving_node = source
@@ -800,6 +820,7 @@ class RlDec2D(Strategy):
                     #rewards = delay from content loc to receiver
                     self.view.agents[agent_inx].rewards -= min_delay
                 #TODO - find how to give rewards
+                #print("REWARDS : ", self.view.agents[agent_inx].rewards, agent_inx)
                 self.view.agents[agent_inx].policy.rewards.append(self.view.agents[agent_inx].rewards)
                 self.view.agents[agent_inx].rewards = 0
                 if self.view.agents[agent_inx].count % 100 == 0:
@@ -848,6 +869,7 @@ class LeaveCopyEverywhere(Strategy):
         # get all required data
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
+        content_loc = self.view.content_locations(content)
         # Route requests to original source and queries caches on the path
         lock.acquire()
         self.controller.start_session(time, receiver, content, inx, log, count)

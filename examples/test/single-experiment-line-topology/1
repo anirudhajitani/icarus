@@ -13,8 +13,7 @@ The `NetworkController` is also responsible to notify a `DataCollectorProxy`
 of all relevant events.
 """
 import logging
-import sys
-import traceback
+
 import networkx as nx
 import fnss
 import sys
@@ -46,7 +45,7 @@ logger = logging.getLogger('orchestration')
 
 #Uncomment and provide manual seed if needed
 #torch.manual_seed()
-torch.autograd.set_detect_anomaly(True)
+#torch.autograd.set_detect_anomaly(True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 SavedAction = namedtuple('SavedAction', ['log_prob', 'value'])
 SavedAction2 = namedtuple('SavedAction2', ['log_prob', 'value'])
@@ -113,9 +112,8 @@ class Policy(nn.Module):
         super(Policy, self).__init__()
         #print ("INIT")
         #TODO - change the layers based on the total number actions and values we want
-        self.affine1 = nn.Linear(s_len, 256)
-        self.dropout = nn.Dropout(p=0.6)
-        self.affine2 = nn.Linear(256, 128)
+        self.affine1 = nn.Linear(s_len, 128)
+
         # actor's layer
         self.action_head = nn.Linear(128, a_len)
 
@@ -133,9 +131,7 @@ class Policy(nn.Module):
         forward pass of both actor and critic
         """
         #print ("POLICY FORWARD")
-        x = self.affine1(x)
-        x = self.dropout(x)
-        x = F.relu(self.affine2(x))
+        x = F.relu(self.affine1(x))
 
         # actor: choses action to taken based on state s_t
         # by returning probability of each action
@@ -181,12 +177,11 @@ class Agent(object):
         #self.indexes = np.zeros((self.view.model.cache_size[self.cache]), dtype=float)
         if self.view.strategy_name in ['INDEX', 'INDEX_DIST']:
             self.indexes = dict()
-        if self.view.strategy_name in ['INDEX', 'INDEX_DIST', 'RL_DEC_1', 'RL_DEC_2F', 'RL_DEC_2D']:
+        if self.view.strategy_name in ['INDEX', 'INDEX_DIST', 'RL_DEC_2F', 'RL_DEC_2D']:
             self.requests = collections.deque(maxlen=window)
         #All possible combinations of files (assuming minimum size of file is 1)
         print ("Cache size : ", self.cache_size)
-        # if ver == 1 then, combinatorial action
-        if self.view.strategy_name in ['RL_DEC_1'] and ver == 1:
+        if self.view.strategy_name in ['RL_DEC_1']:
             self.action_choice = []
             self.valid_action = []
             for i in range(1, self.view.model.cache_size[self.cache] + 1):
@@ -217,7 +212,7 @@ class Agent(object):
         """
         self.state_ver = ver
         #self.action_space = combinations(
-        if self.state_ver == 0 or self.state_ver == 1:
+        if self.state_ver == 0:
             if self.view.strategy_name in ['INDEX_DIST', 'RL_DEC_1', 'RL_DEC_2F', 'RL_DEC_2D']:
                 self.state_counts = np.full((len(self.view.model.library)), 0, dtype=int) 
             self.state = np.full((len(self.view.model.library)), 0, dtype=int) 
@@ -235,34 +230,22 @@ class Agent(object):
         #state space is lib size + 1 (for the input)
 
         if self.view.strategy_name in ['RL_DEC_1']:
-            try:
-                if self.state_ver == 1:
-                    self.policy = Policy(len(self.view.model.library), len(self.valid_action))
-                else:
-                    self.policy = Policy(len(self.view.model.library), len(self.view.model.library))
-                #print ("POLICY", self.policy)
-                self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
-                #print ("OPTIMIZER", self.optimizer)
-                self.eps = np.finfo(np.float32).eps.item()
-                #print ("EPS", self.eps)
-            except:
-                print(traceback.format_exc())
-                print(sys.exc_info()[2])
-
+            self.policy = Policy(len(self.view.model.library), len(self.valid_action))
+            #print ("POLICY", self.policy)
+            self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
+            #print ("OPTIMIZER", self.optimizer)
+            self.eps = np.finfo(np.float32).eps.item()
+            #print ("EPS", self.eps)
         if self.view.strategy_name in ['RL_DEC_2F', 'RL_DEC_2D']:
-            try:
-                self.policy = Policy(len(self.view.model.library)*2, len(self.valid_action))
-                #print ("POLICY", self.policy)
-                self.policy2 = Policy(self.cache_size, self.cache_size)
-                self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
-                self.optimizer2 = optim.Adam(self.policy2.parameters(), lr=lr)
-                #print ("OPTIMIZER", self.optimizer)
-                self.eps = np.finfo(np.float32).eps.item()
-                self.eps2 = np.finfo(np.float32).eps.item()
-                #print ("EPS", self.eps)
-            except:
-                print(traceback.format_exc())
-                print(sys.exc_info()[2])
+            self.policy = Policy(len(self.view.model.library)*2, len(self.valid_action))
+            #print ("POLICY", self.policy)
+            self.policy2 = Policy(self.cache_size, self.cache_size)
+            self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
+            self.optimizer2 = optim.Adam(self.policy2.parameters(), lr=lr)
+            #print ("OPTIMIZER", self.optimizer)
+            self.eps = np.finfo(np.float32).eps.item()
+            self.eps2 = np.finfo(np.float32).eps.item()
+            #print ("EPS", self.eps)
 
 
     def get_state(self):
@@ -298,38 +281,25 @@ class Agent(object):
         Decode the action and return a vector of binary values signifying which caches
         should cache what content
         """
+        files_to_cache = self.valid_action[action[0]]
+        files_to_cache = list(files_to_cache)
+        #print ("Files to cache", files_to_cache)
         action_decoded = np.full((len(self.view.model.library)), 0, dtype=int)
-        if self.state_ver == 1:
-            files_to_cache = self.valid_action[action[0]]
-            files_to_cache = list(files_to_cache)
-            #print ("Files to cache", files_to_cache)
-            for f in files_to_cache:
-                action_decoded[f] = 1
-        else:
-            for a in action:
-                action_decoded[a] = 1
+        for f in files_to_cache:
+            action_decoded[f] = 1
         #print ("Action decoded", action_decoded)
         return action_decoded
 
     def select_actions(self, state):
         state = torch.from_numpy(state).float().to(device)
         #print ("STATE", state)
-        probs, state_value = self.policy.forward(state)
+        probs, state_value = self.policy(state)
         #print ("PROBS, STATE_VAL", probs, state_value)
         # create categorical distribution over list of probabilities of actions
         m = Categorical(probs)
         #print ("Output of NN ")
         #print (m)
         # sample an action from the categorical distribution
-        # Select top k values from probability softmax output
-        if self.state_ver == 0 and self.view.strategy_name in ['RL_DEC_1']:
-            top_k_val, top_k_inx = probs.topk(self.cache_size)
-            for action in top_k_inx:
-                self.policy.saved_actions.append(SavedAction(m.log_prob(action), state_value))
-            top_k_inx = top_k_inx.cpu().detach().numpy()
-            return top_k_inx
-        #print ("TOP K INDEX", top_k_inx, type(top_k_inx))
-        #print ("TOP K VAL", top_k_val)
         action = m.sample()
         #print ("Sampled Action", action)
         # save to action buffer
@@ -369,7 +339,7 @@ class Agent(object):
 
         Training code. Calculates actor and critic loss and performn backpropogation.
         """
-        #print ("UPDATE FN")
+        print ("UPDATE FN")
         R = 0
         saved_actions = self.policy.saved_actions
         policy_losses = [] # list to save actor (policy) loss
@@ -386,10 +356,8 @@ class Agent(object):
         returns = torch.tensor(returns, device=device)
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
         #print ("Returns ", returns)
-        #print ("RETURNS LEN", len(returns))
 
         #print ("Saved Actions", saved_actions)
-        #print ("SAVED ACTIONS LEN", len(saved_actions))
         for (log_prob, value), R in zip(saved_actions, returns):
             advantage = R - value.item()
 
@@ -518,19 +486,10 @@ class NetworkView(object):
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
             self.agents.append(Agent(self, r, 0,  nnp['gamma'], nnp['lr'], nnp['window']))
-        if strategy_name in ['RL_DEC_1']:
+        if strategy_name == 'RL_DEC_1':
             self.agents_per_thread = int(len(self.agents)/cpus)
             self.extra_agents = len(self.agents) % cpus
-        if strategy_name in ['INDEX']:
-            if 'index_threshold_f' not in nnp:
-                nnp['index_threshold_f'] = 10
-            self.threshold = nnp['index_threshold_f']
-        if strategy_name in ['INDEX_DIST']:
-            if 'index_threshold_d' not in nnp:
-                nnp['index_threshold_d'] = 0.5
-            self.threshold = nnp['index_threshold_d']
-
-        #print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
+            #print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
     """
     def env_step():
 
@@ -573,7 +532,7 @@ class NetworkView(object):
         """
         loc = set(v for v in self.model.cache if self.model.cache[v].has(k))
         source = self.content_source(k)
-        if source >=0:
+        if source:
             loc.add(source)
         return loc
 

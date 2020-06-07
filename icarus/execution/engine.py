@@ -93,7 +93,7 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     lock = th.Lock()
     barrier = th.Barrier(cpus)
     jobs = []
-    #print ("BEFORE THREAD CALL")
+    print ("BEFORE THREAD CALL")
     #if sys.version_info > (3, 2):
     #    callbacks["error_callback"] = error_callback
     for inx, req in enumerate(requests):

@@ -217,7 +217,7 @@ class Agent(object):
         """
         self.state_ver = ver
         #self.action_space = combinations(
-        if self.state_ver == 0 or self.state_ver == 1:
+        if self.state_ver == 0:
             if self.view.strategy_name in ['INDEX_DIST', 'RL_DEC_1', 'RL_DEC_2F', 'RL_DEC_2D']:
                 self.state_counts = np.full((len(self.view.model.library)), 0, dtype=int) 
             self.state = np.full((len(self.view.model.library)), 0, dtype=int) 
@@ -380,16 +380,14 @@ class Agent(object):
         # this reward is appended by the environment 
         for r in self.policy.rewards[::-1]:
             # calculate the discounted value
-            #print ("Reward : ", r)
+            print ("Reward : ", r)
             R = r + self.gamma * R
             returns.insert(0, R)
         returns = torch.tensor(returns, device=device)
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
-        #print ("Returns ", returns)
-        #print ("RETURNS LEN", len(returns))
+        print ("Returns ", returns)
 
-        #print ("Saved Actions", saved_actions)
-        #print ("SAVED ACTIONS LEN", len(saved_actions))
+        print ("Saved Actions", saved_actions)
         for (log_prob, value), R in zip(saved_actions, returns):
             advantage = R - value.item()
 
@@ -517,7 +515,7 @@ class NetworkView(object):
         self.window = nnp['window']
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
-            self.agents.append(Agent(self, r, 0,  nnp['gamma'], nnp['lr'], nnp['window']))
+            self.agents.append(Agent(self, r, 1,  nnp['gamma'], nnp['lr'], nnp['window']))
         if strategy_name in ['RL_DEC_1']:
             self.agents_per_thread = int(len(self.agents)/cpus)
             self.extra_agents = len(self.agents) % cpus
@@ -530,7 +528,7 @@ class NetworkView(object):
                 nnp['index_threshold_d'] = 0.5
             self.threshold = nnp['index_threshold_d']
 
-        #print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
+            #print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
     """
     def env_step():
 
@@ -573,7 +571,7 @@ class NetworkView(object):
         """
         loc = set(v for v in self.model.cache if self.model.cache[v].has(k))
         source = self.content_source(k)
-        if source >=0:
+        if source:
             loc.add(source)
         return loc
 

@@ -149,6 +149,45 @@ class Policy(nn.Module):
         # 2. the value from state s_t
         return action_prob, state_values
 
+class RNNPolicy(nn.Module):
+    """
+    A2C Actor and Critic Policy Network with RNN
+    """
+    def __init__(self, s_len, hidden_size, a_len):
+        super(RNNPolicy, self).__init__()
+        self.lstm = nn.LSTM(s_len, hidden_size, batch_first = True)
+        self.affine1 = nn.Linear(hidden_size, 256)
+        self.dropout = nn.Dropout(p=0.6)
+        self.affine2 = nn.Linear(256, 128)
+        # actor's layer
+        self.action_head = nn.Linear(128, a_len)
+
+        # critic's layer
+        self.value_head = nn.Linear(128, 1)
+
+        # action and reward buffer
+        self.saved_actions = []
+        self.rewards = []
+        self.to(device)
+
+    def forward(self, x, hidden):
+        x, hidden = self.lstm(x, hidden)
+        x = self.affine1(x)
+        x = self.dropout(x)
+        x = F.relu(self.affine2(x))
+
+        # actor: choses action to taken based on state s_t
+        # by returning probability of each action
+        action_prob = F.softmax(self.action_head(x), dim=-1)
+
+        # critic evaluates being in state s_t
+        state_values = self.value_head(x)
+
+        # return value of both actor and critic as a 2 tuple
+        # 1. a list of probability of each action over state space
+        # 2. the value from state s_t
+        return action_prob, state_values, hidden
+
 
 class Agent(object):
     """
@@ -158,13 +197,19 @@ class Agent(object):
     is executing.
     """
 
-    def __init__(self, view, router, ver, gamma=0.9, lr=3e-2, window=250):
+    def __init__(self, view, router, ver, policy_type, gamma=0.9, lr=3e-2, window=250):
         """Constructor
         
         Parameters
         ----------
         model : NetworkView
             The network view instance
+        ver : Version
+            If ver == 0, select top k softmax actions and append experiences for all during reward calculation
+            If ver == 1, action space is combinatorial f^C_k
+        policy_type : Policy type
+            if policy_type == 0, it is simple Feed-Forward Network
+            if policy_type == 1, it is RNN
         """
         if not isinstance(view, NetworkView):
             raise ValueError('The model argument must be an instance of '
@@ -175,6 +220,7 @@ class Agent(object):
         #If all cache are equal size, can be moved to model
         self.count = 0
         self.count2 = 1
+        self.hidden_state = 256
         self.gamma = gamma
         self.rewards = 0
         self.valid_action = [0, 1]
@@ -216,6 +262,10 @@ class Agent(object):
         with its binomial/multinomial distribution.
         """
         self.state_ver = ver
+        self.policy_type = policy_type
+        if self.policy_type == 1:
+            self.a_hx = torch.zeros(self.hidden_state).unsqueeze(0).unsqueeze(0).to(device);
+            self.a_cx = torch.zeros(self.hidden_state).unsqueeze(0).unsqueeze(0).to(device);
         #self.action_space = combinations(
         if self.state_ver == 0 or self.state_ver == 1:
             if self.view.strategy_name in ['INDEX_DIST', 'RL_DEC_1', 'RL_DEC_2F', 'RL_DEC_2D']:
@@ -237,9 +287,16 @@ class Agent(object):
         if self.view.strategy_name in ['RL_DEC_1']:
             try:
                 if self.state_ver == 1:
-                    self.policy = Policy(len(self.view.model.library), len(self.valid_action))
+                    if self.policy_type == 0:
+                        self.policy = Policy(len(self.view.model.library), len(self.valid_action))
+                    else:
+                        self.policy = RNNPolicy(len(self.view.model.library), self.hidden_state, len(self.valid_action))
                 else:
-                    self.policy = Policy(len(self.view.model.library), len(self.view.model.library))
+                    if self.policy_type == 0:
+                        self.policy = Policy(len(self.view.model.library), len(self.view.model.library))
+                    else:
+                        self.policy = RNNPolicy(len(self.view.model.library), self.hidden_state, len(self.view.model.library))
+
                 #print ("POLICY", self.policy)
                 self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
                 #print ("OPTIMIZER", self.optimizer)
@@ -251,9 +308,14 @@ class Agent(object):
 
         if self.view.strategy_name in ['RL_DEC_2F', 'RL_DEC_2D']:
             try:
-                self.policy = Policy(len(self.view.model.library)*2, len(self.valid_action))
-                #print ("POLICY", self.policy)
-                self.policy2 = Policy(self.cache_size, self.cache_size)
+                if self.policy_type == 0:
+                    self.policy = Policy(len(self.view.model.library)*2, len(self.valid_action))
+                    #print ("POLICY", self.policy)
+                    self.policy2 = Policy(self.cache_size, self.cache_size)
+                else:
+                    self.policy = RNNPolicy(len(self.view.model.library)*2, self.hidden_state, len(self.valid_action))
+                    #print ("POLICY", self.policy)
+                    self.policy2 = RNNPolicy(self.cache_size, self.hidden_state, self.cache_size)
                 self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
                 self.optimizer2 = optim.Adam(self.policy2.parameters(), lr=lr)
                 #print ("OPTIMIZER", self.optimizer)
@@ -312,9 +374,13 @@ class Agent(object):
         return action_decoded
 
     def select_actions(self, state):
-        state = torch.from_numpy(state).float().to(device)
         #print ("STATE", state)
-        probs, state_value = self.policy.forward(state)
+        if self.policy_type == 0:
+            state = torch.from_numpy(state).float().to(device)
+            probs, state_value = self.policy.forward(state)
+        else:
+            state = torch.from_numpy(state).float().unsqueeze(0).unsqueeze(0).to(device)
+            probs, state_value, (self.a_hx, self.a_cx) = self.policy.forward(state, (self.a_hx, self.a_cx))
         #print ("PROBS, STATE_VAL", probs, state_value)
         # create categorical distribution over list of probabilities of actions
         m = Categorical(probs)
@@ -347,9 +413,13 @@ class Agent(object):
         return [action.item()]
 
     def select_actions_2(self, state):
-        state = torch.from_numpy(state).float().to(device)
         #print ("STATE", state)
-        probs, state_value = self.policy2.forward(state)
+        if self.policy_type == 0:
+            state = torch.from_numpy(state).float().to(device)
+            probs, state_value = self.policy2.forward(state)
+        else:
+            state = torch.from_numpy(state).float().unsqueeze(0).unsqueeze(0).to(device)
+            probs, state_value, (self.a_hx, self.a_cx) = self.policy2.forward(state, (self.a_hx, self.a_cx))
         #print ("PROBS2, STATE_VAL2", probs, state_value)
         # create categorical distribution over list of probabilities of actions
         m = Categorical(probs)
@@ -416,6 +486,9 @@ class Agent(object):
         self.optimizer.step()
         #print ("Optimizer Step")
         # reset rewards and action buffers
+        if self.policy_type == 1:
+            self.a_hx = torch.zeros(self.hidden_state).unsqueeze(0).unsqueeze(0).to(device);
+            self.a_cx = torch.zeros(self.hidden_state).unsqueeze(0).unsqueeze(0).to(device);
         del self.policy.rewards[:]
         del self.policy.saved_actions[:]
         #print ("Deleted policy and saved actions")
@@ -517,7 +590,7 @@ class NetworkView(object):
         self.window = nnp['window']
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
-            self.agents.append(Agent(self, r, 0,  nnp['gamma'], nnp['lr'], nnp['window']))
+            self.agents.append(Agent(self, r, 0, 1, nnp['gamma'], nnp['lr'], nnp['window']))
         if strategy_name in ['RL_DEC_1']:
             self.agents_per_thread = int(len(self.agents)/cpus)
             self.extra_agents = len(self.agents) % cpus
@@ -573,7 +646,7 @@ class NetworkView(object):
         """
         loc = set(v for v in self.model.cache if self.model.cache[v].has(k))
         source = self.content_source(k)
-        if source >=0:
+        if source:
             loc.add(source)
         return loc
 

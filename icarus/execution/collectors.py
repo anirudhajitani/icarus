@@ -341,6 +341,7 @@ class LatencyCollector(DataCollector):
     @inheritdoc(DataCollector)
     def results(self):
         print ("Latency Sessions ", self.sess_count)
+        print ("Latency ", self.latency)
         results = Tree({'MEAN': self.latency / self.sess_count})
         if self.cdf:
             results['CDF'] = cdf(self.latency_data)

@@ -114,7 +114,8 @@ class Policy(nn.Module):
         #print ("INIT")
         #TODO - change the layers based on the total number actions and values we want
         self.affine1 = nn.Linear(s_len, 256)
-        self.dropout = nn.Dropout(p=0.6)
+        #Don't want to use Dropout with RL (not very stable)
+        #self.dropout = nn.Dropout(p=0.6)
         self.affine2 = nn.Linear(256, 128)
         # actor's layer
         self.action_head = nn.Linear(128, a_len)
@@ -133,8 +134,8 @@ class Policy(nn.Module):
         forward pass of both actor and critic
         """
         #print ("POLICY FORWARD")
-        x = self.affine1(x)
-        x = self.dropout(x)
+        x = F.relu(self.affine1(x))
+        #x = self.dropout(x)
         x = F.relu(self.affine2(x))
 
         # actor: choses action to taken based on state s_t
@@ -153,11 +154,12 @@ class RNNPolicy(nn.Module):
     """
     A2C Actor and Critic Policy Network with RNN
     """
-    def __init__(self, s_len, hidden_size, a_len):
+    def __init__(self, s_len, hidden_dim, a_len):
         super(RNNPolicy, self).__init__()
-        self.lstm = nn.LSTM(s_len, hidden_size, batch_first = True)
-        self.affine1 = nn.Linear(hidden_size, 256)
-        self.dropout = nn.Dropout(p=0.6)
+        self.hidden_dim = hidden_dim
+        self.lstm = nn.LSTM(s_len, hidden_dim, batch_first = True)
+        self.affine1 = nn.Linear(hidden_dim, 256)
+        #self.dropout = nn.Dropout(p=0.6)
         self.affine2 = nn.Linear(256, 128)
         # actor's layer
         self.action_head = nn.Linear(128, a_len)
@@ -171,18 +173,23 @@ class RNNPolicy(nn.Module):
         self.to(device)
 
     def forward(self, x, hidden):
+        batch_size = x.size(0)
         x, hidden = self.lstm(x, hidden)
-        x = self.affine1(x)
-        x = self.dropout(x)
+        x = x.contiguous().view(-1, self.hidden_dim)
+        x = F.relu(self.affine1(x))
+        #x = self.dropout(x)
         x = F.relu(self.affine2(x))
 
         # actor: choses action to taken based on state s_t
         # by returning probability of each action
         action_prob = F.softmax(self.action_head(x), dim=-1)
+        action_prob = action_prob.view(batch_size, -1)
+        action_prob = action_prob[:,-1]
 
         # critic evaluates being in state s_t
         state_values = self.value_head(x)
-
+        state_values = state_values.view(batch_size, -1)
+        state_values = state_values[:,-1]
         # return value of both actor and critic as a 2 tuple
         # 1. a list of probability of each action over state space
         # 2. the value from state s_t
@@ -232,8 +239,8 @@ class Agent(object):
             self.requests = collections.deque(maxlen=window)
         #All possible combinations of files (assuming minimum size of file is 1)
         print ("Cache size : ", self.cache_size)
-        # if ver == 1 and comb is set to 1 then, combinatorial action
-        if self.view.strategy_name in ['RL_DEC_1'] and ver == 1 and comb == 1:
+        # if ver == 1 and comb is set to 1 then, combinatorial action, else if 0 find more optimized way of encoding (not yet implemented)
+        if self.view.strategy_name in ['RL_DEC_1'] and ver == 1:
             self.action_choice = []
             self.valid_action = []
             for i in range(1, self.view.model.cache_size[self.cache] + 1):
@@ -382,7 +389,7 @@ class Agent(object):
         else:
             state = torch.from_numpy(state).float().unsqueeze(0).unsqueeze(0).to(device)
             probs, state_value, (self.a_hx, self.a_cx) = self.policy.forward(state, (self.a_hx, self.a_cx))
-        #print ("PROBS, STATE_VAL", probs, state_value)
+        #print ("PROBS, STATE_VAL", probs.shape, state_value.shape)
         # create categorical distribution over list of probabilities of actions
         m = Categorical(probs)
         #print ("Output of NN ")
@@ -487,9 +494,12 @@ class Agent(object):
         self.optimizer.step()
         #print ("Optimizer Step")
         # reset rewards and action buffers
+        # We dont want to reset it as we want the hidden layers to be preserved
+        """
         if self.policy_type == 1:
             self.a_hx = torch.zeros(self.hidden_state).unsqueeze(0).unsqueeze(0).to(device);
             self.a_cx = torch.zeros(self.hidden_state).unsqueeze(0).unsqueeze(0).to(device);
+        """
         del self.policy.rewards[:]
         del self.policy.saved_actions[:]
         #print ("Deleted policy and saved actions")
@@ -571,6 +581,8 @@ class NetworkView(object):
         self.model = model
         self.count = 0
         self.common_rewards = 0
+        self.tot_delay = 0
+        self.fetch_delay = 0
         self.strategy_name = strategy_name
         #Different because other library is a set, here we want to preserve ordering
         self.lib = [item for item in range(0, len(self.model.library))]

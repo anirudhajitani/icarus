@@ -392,7 +392,7 @@ class RlDec1(Strategy):
         #print ("Index = ", inx, start, end)
         return start, end
 
-    def env_step(self, size, inx, lock):
+    def env_step(self, size, inx, lock, log):
         """
 
         A step of the environment includes the following for all agents:
@@ -407,7 +407,11 @@ class RlDec1(Strategy):
             #print ("STATE for ", i, " = ", curr_state)
             action = self.view.agents[i].select_actions(curr_state)
             action = self.view.agents[i].decode_action(action)
-            self.view.agents[i].rewards -= self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
+            #self.view.agents[i].rewards -= self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
+            delay_fetch = self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
+            if log == True:
+                self.view.fetch_delay += (delay_fetch * 2)
+            self.view.agents[i].rewards -= delay_fetch 
 
     def update_gradients(self, inx):
         """
@@ -500,7 +504,7 @@ class RlDec1(Strategy):
         #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:
         if count % self.view.update_freq == 0:
-            self.env_step(size, inx, lock) 
+            self.env_step(size, inx, lock, log) 
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
         #print ("Content Loc: ", content_loc, content)
@@ -532,6 +536,9 @@ class RlDec1(Strategy):
             self.controller.forward_request_hop(u, v, inx)
             cont_status = self.controller.get_content(v, inx)
         # update the rewards for the episode
+        if log == True:
+            self.view.tot_delay += (min_delay * 2)
+        print ("DELAY ", serving_node, " , ", min_delay, " TOT_DEL ", self.view.tot_delay, " FETCH DELAY ", self.view.fetch_delay)
         self.view.common_rewards -= min_delay
         #print ("COMMON REW", min_delay, self.view.common_rewards)
         lock.release()

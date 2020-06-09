@@ -197,7 +197,7 @@ class Agent(object):
     is executing.
     """
 
-    def __init__(self, view, router, ver, policy_type, gamma=0.9, lr=3e-2, window=250):
+    def __init__(self, view, router, ver, policy_type, gamma=0.9, lr=3e-2, window=250, comb=0):
         """Constructor
         
         Parameters
@@ -224,6 +224,7 @@ class Agent(object):
         self.gamma = gamma
         self.rewards = 0
         self.valid_action = [0, 1]
+        print ("VER, POL, COMB", ver, policy_type, comb) 
         #self.indexes = np.zeros((self.view.model.cache_size[self.cache]), dtype=float)
         if self.view.strategy_name in ['INDEX', 'INDEX_DIST']:
             self.indexes = dict()
@@ -231,8 +232,8 @@ class Agent(object):
             self.requests = collections.deque(maxlen=window)
         #All possible combinations of files (assuming minimum size of file is 1)
         print ("Cache size : ", self.cache_size)
-        # if ver == 1 then, combinatorial action
-        if self.view.strategy_name in ['RL_DEC_1'] and ver == 1:
+        # if ver == 1 and comb is set to 1 then, combinatorial action
+        if self.view.strategy_name in ['RL_DEC_1'] and ver == 1 and comb == 1:
             self.action_choice = []
             self.valid_action = []
             for i in range(1, self.view.model.cache_size[self.cache] + 1):
@@ -584,13 +585,22 @@ class NetworkView(object):
             nnp['window'] = 250
         if 'update_freq' not in nnp:
             nnp['update_freq'] = 100
+        if 'state_ver' not in nnp:
+            nnp['state_ver'] = 0
+        if 'policy_type' not in nnp:
+            nnp['policy_type'] = 0
+        if 'comb' not in nnp:
+            nnp['comb'] = 0
         #self.status = [False] * cpus
         #self.ind_count = [0] * cpus
         self.update_freq = nnp['update_freq']
         self.window = nnp['window']
+        self.state_ver = nnp['state_ver']
+        self.policy_type = nnp['policy_type']
+        self.comb = nnp['comb']
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
-            self.agents.append(Agent(self, r, 0, 1, nnp['gamma'], nnp['lr'], nnp['window']))
+            self.agents.append(Agent(self, r, self.state_ver, self.policy_type, nnp['gamma'], nnp['lr'], nnp['window'], nnp['comb']))
         if strategy_name in ['RL_DEC_1']:
             self.agents_per_thread = int(len(self.agents)/cpus)
             self.extra_agents = len(self.agents) % cpus

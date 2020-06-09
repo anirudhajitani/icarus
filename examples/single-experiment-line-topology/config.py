@@ -30,7 +30,7 @@ CACHING_GRANULARITY = 'OBJECT'
 # Result readers and writers are located in module ./icarus/results/readwrite.py
 # Currently only PICKLE is supported
 RESULTS_FORMAT = 'PICKLE'
-RESULTS_RESUME = 0
+RESULTS_RESUME = 1
 # List of metrics to be measured in the experiments
 # The implementation of data collectors are located in ./icarus/execution/collectors.py
 DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD', 'PATH_STRETCH']
@@ -50,7 +50,7 @@ experiment['topology']['delay'] = 40
 """
 experiment['topology']['name'] = 'TREE'
 experiment['topology']['k'] = 2
-experiment['topology']['h'] = 4
+experiment['topology']['h'] = 2
 experiment['topology']['delay'] = 30
 """
 experiment['topology']['name'] = 'ROCKET_FUEL'
@@ -60,9 +60,9 @@ experiment['topology']['asn'] = 1221
 experiment['workload'] = {
          'name':       'STATIONARY',
          'n_contents': 200,
-         'n_warmup':   10 ** 7,
-         'n_measured': 5 * 10 ** 7,
-         'alpha':      1.0,
+         'n_warmup':   1 * 10 ** 7,
+         'n_measured': 3 * 10 ** 7,
+         'alpha':      0.6,
          'rate':       12.0
                        }
 
@@ -70,6 +70,8 @@ experiment['workload'] = {
 experiment['nnp']['window'] = 200
 experiment['nnp']['lr'] = 0.03
 experiment['nnp']['gamma'] = 0.9
+experiment['nnp']['state_ver'] = 0
+experiment['nnp']['policy_type'] = 0
 experiment['nnp']['index_threshold_f'] = experiment['topology']['delay']
 #experiment['nnp']['index_threshold_d'] = (experiment['topology']['delay'] / experiment['workload']['n_contents']) * 2
 
@@ -84,7 +86,7 @@ experiment['content_placement']['name'] = 'UNIFORM'
 experiment['cache_policy']['name'] = 'IN_CACHE_LFU'
 
 # Set caching meta-policy
-experiment['strategy']['name'] = 'RL_DEC_2F'
+experiment['strategy']['name'] = 'RL_DEC_1'
 
 # Description of the experiment
 experiment['desc'] = "Line topology with 10 nodes"

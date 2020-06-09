@@ -355,10 +355,15 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
  
         nnp = dict()
         if strategy['name'] == 'RL_DEC_1':
-            nnp['comb'] = 1
+            if 'comb' in tree['nnp']:
+                nnp['comb'] = tree['nnp']['comb']
+            if 'state_ver' in tree['nnp']:
+                nnp['state_ver'] = tree['nnp']['state_ver']
         if 'nnp' in tree:
             if 'window' in tree['nnp']:
                 nnp['window'] = tree['nnp']['window']
+            if 'policy_type' in tree['nnp']:
+                nnp['policy_type'] = tree['nnp']['policy_type']
             if 'lr' in tree['nnp']:
                 nnp['lr'] = tree['nnp']['lr']
             if 'gamma' in tree['nnp']:

@@ -389,7 +389,7 @@ class RlDec1(Strategy):
             end = len(self.view.agents)
         else:
             end = start + self.view.agents_per_thread
-        #print ("Index = ", inx, start, end)
+        print ("Index = ", inx, start, end)
         return start, end
 
     def env_step(self, size, inx, lock, log):
@@ -489,7 +489,7 @@ class RlDec1(Strategy):
     @inheritdoc(Strategy)
     def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
-        #print ("PROCESS EVENT", time, receiver, content)
+        print ("PROCESS EVENT", time, receiver, content, log)
         #print ("LOCK : ", lock)
         #print ("ID", id(self), id(self.view), id(self.controller))
         source = self.view.content_source(content)
@@ -507,7 +507,7 @@ class RlDec1(Strategy):
             self.env_step(size, inx, lock, log) 
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
-        #print ("Content Loc: ", content_loc, content)
+        print ("Content Loc: ", content_loc, content)
         min_delay = self.view.shortest_path_len(source, receiver)
         #print ("Min Delay ", min_delay) 
         # Finding the path with the minimum delay in the network
@@ -516,6 +516,7 @@ class RlDec1(Strategy):
             delay = self.view.shortest_path_len(receiver, c)
             #print ("Delay : ", receiver, " , ", c, " : ", delay) 
             if delay < min_delay:
+                print ("FOUND IN CACHE : ", c, " content ", receiver)
                 min_delay = delay
                 serving_node = c
 
@@ -538,7 +539,7 @@ class RlDec1(Strategy):
         # update the rewards for the episode
         if log == True:
             self.view.tot_delay += (min_delay * 2)
-        print ("DELAY ", serving_node, " , ", min_delay, " TOT_DEL ", self.view.tot_delay, " FETCH DELAY ", self.view.fetch_delay)
+        print ("DELAY ", serving_node, " , ", min_delay, " DEL ", self.view.tot_delay, " FETCH DELAY ", self.view.fetch_delay, "TOT_DELAY", self.view.tot_delay + self.view.fetch_delay)
         self.view.common_rewards -= min_delay
         #print ("COMMON REW", min_delay, self.view.common_rewards)
         lock.release()
@@ -874,6 +875,7 @@ class LeaveCopyEverywhere(Strategy):
     @inheritdoc(Strategy)
     def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
+        print ("PROCESS EVENT", time, receiver, content, log)
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
         content_loc = self.view.content_locations(content)
@@ -890,12 +892,16 @@ class LeaveCopyEverywhere(Strategy):
             self.controller.get_content(v, inx)
             serving_node = v
         # Return content
+        delay = self.view.shortest_path_len(receiver, serving_node)
+        if log == True:
+            self.view.tot_delay += (delay * 2)
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
         for u, v in path_links(path):
             self.controller.forward_content_hop(u, v, size, inx)
             if self.view.has_cache(v):
                 # insert content
                 self.controller.put_content(v, inx)
+        print ("TOT DELAY = ", self.view.tot_delay) 
         self.controller.end_session(inx)
         lock.release()
 

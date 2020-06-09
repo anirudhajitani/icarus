@@ -60,8 +60,8 @@ experiment['topology']['asn'] = 1221
 experiment['workload'] = {
          'name':       'STATIONARY',
          'n_contents': 200,
-         'n_warmup':   1 * 10 ** 5,
-         'n_measured': 5 * 10 ** 5,
+         'n_warmup':   1 * 10 ** 3,
+         'n_measured': 5 * 10 ** 3,
          'alpha':      1.0,
          'rate':       12.0
                        }
@@ -86,7 +86,7 @@ experiment['content_placement']['name'] = 'UNIFORM'
 experiment['cache_policy']['name'] = 'IN_CACHE_LFU'
 
 # Set caching meta-policy
-experiment['strategy']['name'] = 'RL_DEC_2D'
+experiment['strategy']['name'] = 'RL_DEC_1'
 #experiment['strategy']['name'] = 'LCE'
 
 # Description of the experiment

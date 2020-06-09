@@ -323,12 +323,14 @@ class LatencyCollector(DataCollector):
     def request_hop(self, u, v, main_path=True):
         if main_path:
             self.sess_latency += self.view.link_delay(u, v)
+            print ("REQUEST HOP ", u, v, self.sess_latency)
 
     @inheritdoc(DataCollector)
     def content_hop(self, u, v, size, main_path=True):
         if main_path:
             #Multiply by size of file 
             self.sess_latency += (self.view.link_delay(u, v))
+            print ("CONTENT HOP ", u, v, self.sess_latency)
 
     @inheritdoc(DataCollector)
     def end_session(self, success=True):
@@ -337,6 +339,7 @@ class LatencyCollector(DataCollector):
         if self.cdf:
             self.latency_data.append(self.sess_latency)
         self.latency += self.sess_latency
+        print ("LATENCY AFTER SESSION ", self.sess_count, self.latency)
 
     @inheritdoc(DataCollector)
     def results(self):

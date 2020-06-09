@@ -447,7 +447,7 @@ class Agent(object):
 
         Training code. Calculates actor and critic loss and performn backpropogation.
         """
-        #print ("UPDATE FN")
+        print ("UPDATE FN")
         R = 0
         saved_actions = self.policy.saved_actions
         policy_losses = [] # list to save actor (policy) loss
@@ -464,10 +464,10 @@ class Agent(object):
         returns = torch.tensor(returns, device=device)
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
         #print ("Returns ", returns)
-        #print ("RETURNS LEN", len(returns))
+        print ("RETURNS LEN", len(returns))
 
         #print ("Saved Actions", saved_actions)
-        #print ("SAVED ACTIONS LEN", len(saved_actions))
+        print ("SAVED ACTIONS LEN", len(saved_actions))
         for (log_prob, value), R in zip(saved_actions, returns):
             advantage = R - value.item()
 
@@ -616,6 +616,7 @@ class NetworkView(object):
         if strategy_name in ['RL_DEC_1']:
             self.agents_per_thread = int(len(self.agents)/cpus)
             self.extra_agents = len(self.agents) % cpus
+            print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
         if strategy_name in ['INDEX']:
             if 'index_threshold_f' not in nnp:
                 nnp['index_threshold_f'] = 10
@@ -625,7 +626,6 @@ class NetworkView(object):
                 nnp['index_threshold_d'] = 0.5
             self.threshold = nnp['index_threshold_d']
 
-        #print ("CPUS = ", self.cpus, " Agents per thread = ", self.agents_per_thread, " Extra Agents = ", self.extra_agents)
     """
     def env_step():
 

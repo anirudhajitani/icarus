@@ -9,6 +9,7 @@ from icarus.execution import NetworkModel, NetworkView, NetworkController, Colle
 from icarus.registry import DATA_COLLECTOR, STRATEGY
 from pprint import pprint
 from itertools import islice, takewhile, repeat
+import more_itertools as mit
 import torch.multiprocessing as mp
 import threading as th
 import sys
@@ -67,6 +68,9 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     #pprint(vars(topology))
     strategy_name = strategy['name']
     model = NetworkModel(topology, workload, cache_policy, **netconf)
+    agents = len(model.routers)
+    if cpus > agents:
+        cpus = agents
     view = NetworkView(model, cpus, nnp, strategy_name)
     print ("Network View Done")
     controller = NetworkController(model, cpus)
@@ -89,6 +93,7 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
                 takewhile(bool, (list(islice(workload, n)) for _ in repeat(None))))
     workload_len = sum(1 for _ in iter(workload))
     requests = list(split_every(int(workload_len/cpus), iter(workload)))
+    #requests = list(mit.distribute(cpus, iter(workload)))
     callbacks = {"callback": experiment_callback}
     lock = th.Lock()
     barrier = th.Barrier(cpus)
@@ -98,6 +103,7 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     #    callbacks["error_callback"] = error_callback
     for inx, req in enumerate(requests):
         #pool.apply_async(process_event, args=(req, strategy), callback=experiment_callback)
+        print (inx, req)
         t = th.Thread(target=process_event, args=(lock, barrier, req, strategy_inst, inx)) 
         jobs.append(t)
     for j in jobs:

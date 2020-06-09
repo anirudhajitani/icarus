@@ -1103,7 +1103,7 @@ class NetworkController(object):
                             log=log,
                             count=count)
         if self.collector is not None and self.session[inx]['log']:
-            self.collector.start_session(timestamp, receiver, content)
+            self.collector.start_session(timestamp, receiver, content, inx)
 
     def forward_request_path(self, s, t, inx, path=None, main_path=True):
         """Forward a request from node *s* to node *t* over the provided path.
@@ -1164,7 +1164,7 @@ class NetworkController(object):
             correctly in multicast cases. Default value is *True*
         """
         if self.collector is not None and self.session[inx]['log']:
-            self.collector.request_hop(u, v, main_path)
+            self.collector.request_hop(u, v, inx, main_path)
 
     def forward_content_hop(self, u, v, size, inx, main_path=True):
         """Forward a content over link  u -> v.
@@ -1183,7 +1183,7 @@ class NetworkController(object):
             *True*
         """
         if self.collector is not None and self.session[inx]['log']:
-            self.collector.content_hop(u, v, size, main_path)
+            self.collector.content_hop(u, v, size, inx, main_path)
 
     def put_content(self, node, inx, content=None):
         """Store content in the specified node.
@@ -1228,18 +1228,18 @@ class NetworkController(object):
         if node in self.model.cache and content is not None:
             return self.model.cache[node].get(content)
         if node in self.model.cache:
-            cache_hit = self.model.cache[node].get(self.session[inx]['content'])
+            cache_hit = self.model.cache[node].get(self.session[inx]['content'], inx)
             if cache_hit:
                 if self.session[inx]['log']:
-                    self.collector.cache_hit(node)
+                    self.collector.cache_hit(node, inx)
             else:
                 if self.session[inx]['log']:
-                    self.collector.cache_miss(node)
+                    self.collector.cache_miss(node, inx)
             return cache_hit
         name, props = fnss.get_stack(self.model.topology, node)
         if name == 'source' and self.session[inx]['content'] in props['contents']:
             if self.collector is not None and self.session[inx]['log']:
-                self.collector.server_hit(node)
+                self.collector.server_hit(node, inx)
             return True
         else:
             return False
@@ -1273,7 +1273,7 @@ class NetworkController(object):
             *True* if the session was completed successfully, *False* otherwise
         """
         if self.collector is not None and self.session[inx]['log']:
-            self.collector.end_session(success)
+            self.collector.end_session(inx, success)
         self.session[inx] = None
 
     def rewire_link(self, u, v, up, vp, recompute_paths=True):
@@ -1457,7 +1457,7 @@ class NetworkController(object):
             if local_maxlen > 0:
                 self.model.local_cache[v] = type(c)(local_maxlen)
 
-    def get_content_local_cache(self, node):
+    def get_content_local_cache(self, node, inx):
         """Get content from local cache of node (if any)
 
         Get content from a local cache of a node. Local cache must be
@@ -1473,10 +1473,10 @@ class NetworkController(object):
         cache_hit = self.model.local_cache[node].get(self.session['content'])
         if cache_hit:
             if self.session['log']:
-                self.collector.cache_hit(node)
+                self.collector.cache_hit(node, inx)
         else:
             if self.session['log']:
-                self.collector.cache_miss(node)
+                self.collector.cache_miss(node, inx)
         return cache_hit
 
     def put_content_local_cache(self, node):

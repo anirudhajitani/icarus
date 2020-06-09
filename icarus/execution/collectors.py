@@ -45,7 +45,7 @@ class DataCollector(object):
         """
         self.view = view
 
-    def start_session(self, timestamp, receiver, content):
+    def start_session(self, timestamp, receiver, content, inx):
         """Notifies the collector that a new network session started.
 
         A session refers to the retrieval of a content from a receiver, from
@@ -62,7 +62,7 @@ class DataCollector(object):
         """
         pass
 
-    def cache_hit(self, node):
+    def cache_hit(self, node, inx):
         """Reports that the requested content has been served by the cache at
         node *node*.
 
@@ -73,7 +73,7 @@ class DataCollector(object):
         """
         pass
 
-    def cache_miss(self, node):
+    def cache_miss(self, node, inx):
         """Reports that the cache at node *node* has been looked up for
         requested content but there was a cache miss.
 
@@ -84,7 +84,7 @@ class DataCollector(object):
         """
         pass
 
-    def server_hit(self, node):
+    def server_hit(self, node, inx):
         """Reports that the requested content has been served by the server at
         node *node*.
 
@@ -95,7 +95,7 @@ class DataCollector(object):
         """
         pass
 
-    def request_hop(self, u, v, main_path=True):
+    def request_hop(self, u, v, inx, main_path=True):
         """Reports that a request has traversed the link *(u, v)*
 
         Parameters
@@ -111,7 +111,7 @@ class DataCollector(object):
         """
         pass
 
-    def content_hop(self, u, v, size, main_path=True):
+    def content_hop(self, u, v, size, inx, main_path=True):
         """Reports that a content has traversed the link *(u, v)*
 
         Parameters
@@ -128,7 +128,7 @@ class DataCollector(object):
         """
         pass
 
-    def end_session(self, success=True):
+    def end_session(self, inx, success=True):
         """Reports that the session is closed, i.e. the content has been
         successfully delivered to the receiver or a failure blocked the
         execution of the request
@@ -182,39 +182,39 @@ class CollectorProxy(DataCollector):
                            for e in self.EVENTS}
 
     @inheritdoc(DataCollector)
-    def start_session(self, timestamp, receiver, content):
+    def start_session(self, timestamp, receiver, content, inx):
         for c in self.collectors['start_session']:
-            c.start_session(timestamp, receiver, content)
+            c.start_session(timestamp, receiver, content, inx)
 
     @inheritdoc(DataCollector)
-    def cache_hit(self, node):
+    def cache_hit(self, node, inx):
         for c in self.collectors['cache_hit']:
-            c.cache_hit(node)
+            c.cache_hit(node, inx)
 
     @inheritdoc(DataCollector)
-    def cache_miss(self, node):
+    def cache_miss(self, node, inx):
         for c in self.collectors['cache_miss']:
-            c.cache_miss(node)
+            c.cache_miss(node, inx)
 
     @inheritdoc(DataCollector)
-    def server_hit(self, node):
+    def server_hit(self, node, inx):
         for c in self.collectors['server_hit']:
-            c.server_hit(node)
+            c.server_hit(node, inx)
 
     @inheritdoc(DataCollector)
-    def request_hop(self, u, v, main_path=True):
+    def request_hop(self, u, v, inx, main_path=True):
         for c in self.collectors['request_hop']:
-            c.request_hop(u, v, main_path)
+            c.request_hop(u, v, inx, main_path)
 
     @inheritdoc(DataCollector)
-    def content_hop(self, u, v, size, main_path=True):
+    def content_hop(self, u, v, size, inx, main_path=True):
         for c in self.collectors['content_hop']:
-            c.content_hop(u, v, size, main_path)
+            c.content_hop(u, v, size, inx, main_path)
 
     @inheritdoc(DataCollector)
-    def end_session(self, success=True):
+    def end_session(self, inx, success=True):
         for c in self.collectors['end_session']:
-            c.end_session(success)
+            c.end_session(inx, success)
 
     @inheritdoc(DataCollector)
     def results(self):
@@ -226,7 +226,7 @@ class LinkLoadCollector(DataCollector):
     """Data collector measuring the link load
     """
 
-    def __init__(self, view, req_size=150, content_size=1500):
+    def __init__(self, view, threads=1, req_size=1, content_size=10):
         """Constructor
 
         Parameters
@@ -249,17 +249,17 @@ class LinkLoadCollector(DataCollector):
         self.t_end = 1
 
     @inheritdoc(DataCollector)
-    def start_session(self, timestamp, receiver, content):
+    def start_session(self, timestamp, receiver, content, inx):
         if self.t_start < 0:
             self.t_start = timestamp
         self.t_end = timestamp
 
     @inheritdoc(DataCollector)
-    def request_hop(self, u, v, main_path=True):
+    def request_hop(self, u, v, inx, main_path=True):
         self.req_count[(u, v)] += 1
 
     @inheritdoc(DataCollector)
-    def content_hop(self, u, v, size, main_path=True):
+    def content_hop(self, u, v, size, inx, main_path=True):
         #size here instead of count to reflect the actual size used
         self.cont_count[(u, v)] += size
 
@@ -296,7 +296,7 @@ class LatencyCollector(DataCollector):
     content.
     """
 
-    def __init__(self, view, cdf=False):
+    def __init__(self, view, threads=1, cdf=False):
         """Constructor
 
         Parameters
@@ -308,44 +308,47 @@ class LatencyCollector(DataCollector):
         """
         self.cdf = cdf
         self.view = view
-        self.req_latency = 0.0
-        self.sess_count = 0
+        self.sess_latency = dict()
+        self.sess_count = dict()
+        for i in range(threads): 
+            self.sess_latency[i] = 0.0
+            self.sess_count[i] = 0
         self.latency = 0.0
         if cdf:
             self.latency_data = collections.deque()
 
     @inheritdoc(DataCollector)
-    def start_session(self, timestamp, receiver, content):
-        self.sess_count += 1
-        self.sess_latency = 0.0
+    def start_session(self, timestamp, receiver, content, inx):
+        self.sess_count[inx] += 1
+        self.sess_latency[inx] = 0.0
 
     @inheritdoc(DataCollector)
-    def request_hop(self, u, v, main_path=True):
+    def request_hop(self, u, v, inx, main_path=True):
         if main_path:
-            self.sess_latency += self.view.link_delay(u, v)
-            print ("REQUEST HOP ", u, v, self.sess_latency)
+            self.sess_latency[inx] += self.view.link_delay(u, v)
+            print ("REQUEST HOP ", u, v, inx, self.sess_latency[inx])
 
     @inheritdoc(DataCollector)
-    def content_hop(self, u, v, size, main_path=True):
+    def content_hop(self, u, v, size, inx, main_path=True):
         if main_path:
             #Multiply by size of file 
-            self.sess_latency += (self.view.link_delay(u, v))
-            print ("CONTENT HOP ", u, v, self.sess_latency)
+            self.sess_latency[inx] += (self.view.link_delay(u, v))
+            print ("CONTENT HOP ", u, v, inx, self.sess_latency[inx])
 
     @inheritdoc(DataCollector)
-    def end_session(self, success=True):
+    def end_session(self, inx, success=True):
         if not success:
             return
         if self.cdf:
-            self.latency_data.append(self.sess_latency)
-        self.latency += self.sess_latency
-        print ("LATENCY AFTER SESSION ", self.sess_count, self.latency)
+            self.latency_data.append(self.sess_latency[inx])
+        self.latency += self.sess_latency[inx]
+        print ("LATENCY AFTER SESSION ", inx, self.sess_count, self.latency)
 
     @inheritdoc(DataCollector)
     def results(self):
-        print ("Latency Sessions ", self.sess_count)
+        print ("Latency Sessions ", sum(self.sess_count.values()))
         print ("Latency ", self.latency)
-        results = Tree({'MEAN': self.latency / self.sess_count})
+        results = Tree({'MEAN': self.latency / sum(self.sess_count.values())})
         if self.cdf:
             results['CDF'] = cdf(self.latency_data)
         return results
@@ -357,7 +360,7 @@ class CacheHitRatioCollector(DataCollector):
     requests served by a cache.
     """
 
-    def __init__(self, view, off_path_hits=False, per_node=True, content_hits=False):
+    def __init__(self, view, threads=1, off_path_hits=False, per_node=True, content_hits=False):
         """Constructor
 
         Parameters
@@ -375,11 +378,16 @@ class CacheHitRatioCollector(DataCollector):
         self.off_path_hits = off_path_hits
         self.per_node = per_node
         self.cont_hits = content_hits
-        self.sess_count = 0
-        self.cache_hits = 0
-        self.serv_hits = 0
-        if off_path_hits:
-            self.off_path_hit_count = 0
+        self.sess_count = dict()
+        self.cache_hits = dict()
+        self.serv_hits = dict()
+        self.off_path_hit_count = dict()
+        for i in range(threads):
+            self.sess_count[i] = 0
+            self.cache_hits[i] = 0
+            self.serv_hits[i] = 0
+            if off_path_hits:
+                self.off_path_hit_count[i] = 0
         if per_node:
             self.per_node_cache_hits = collections.defaultdict(int)
             self.per_node_server_hits = collections.defaultdict(int)
@@ -389,20 +397,20 @@ class CacheHitRatioCollector(DataCollector):
             self.cont_serv_hits = collections.defaultdict(int)
 
     @inheritdoc(DataCollector)
-    def start_session(self, timestamp, receiver, content):
-        self.sess_count += 1
+    def start_session(self, timestamp, receiver, content, inx):
+        self.sess_count[inx] += 1
         #print ("SESSION COUNT", self.sess_count)
         if self.off_path_hits:
             source = self.view.content_source(content)
             self.curr_path = self.view.shortest_path(receiver, source)
         if self.cont_hits:
-            self.curr_cont = content
+            self.curr_cont[inx] = content
 
     @inheritdoc(DataCollector)
-    def cache_hit(self, node):
-        self.cache_hits += 1
+    def cache_hit(self, node, inx):
+        self.cache_hits[inx] += 1
         if self.off_path_hits and node not in self.curr_path:
-            self.off_path_hit_count += 1
+            self.off_path_hit_count[inx] += 1
         if self.cont_hits:
             self.cont_cache_hits[self.curr_cont] += 1
         if self.per_node:
@@ -410,8 +418,8 @@ class CacheHitRatioCollector(DataCollector):
             #print ("Cache Hit !!!! ")
 
     @inheritdoc(DataCollector)
-    def server_hit(self, node):
-        self.serv_hits += 1
+    def server_hit(self, node, inx):
+        self.serv_hits[inx] += 1
         if self.cont_hits:
             self.cont_serv_hits[self.curr_cont] += 1
         if self.per_node:
@@ -420,12 +428,12 @@ class CacheHitRatioCollector(DataCollector):
     @inheritdoc(DataCollector)
     def results(self):
         print ("RESULTS BEGIN")
-        n_sess = self.cache_hits + self.serv_hits
+        n_sess = sum(self.cache_hits.values()) + sum(self.serv_hits.values())
         print ("Cache Hit Sessions", n_sess)
-        hit_ratio = self.cache_hits / n_sess
+        hit_ratio = sum(self.cache_hits.values()) / n_sess
         results = Tree(**{'MEAN': hit_ratio})
         if self.off_path_hits:
-            results['MEAN_OFF_PATH'] = self.off_path_hit_count / n_sess
+            results['MEAN_OFF_PATH'] = sum(self.off_path_hit_count.values()) / n_sess
             results['MEAN_ON_PATH'] = results['MEAN'] - results['MEAN_OFF_PATH']
         if self.cont_hits:
             cont_set = set(list(self.cont_cache_hits.keys()) + list(self.cont_serv_hits.keys()))
@@ -452,7 +460,7 @@ class PathStretchCollector(DataCollector):
     path length and the shortest path length.
     """
 
-    def __init__(self, view, cdf=False):
+    def __init__(self, view, threads, cdf=False):
         """Constructor
 
         Parameters
@@ -464,9 +472,13 @@ class PathStretchCollector(DataCollector):
         """
         self.view = view
         self.cdf = cdf
-        self.req_path_len = collections.defaultdict(int)
-        self.cont_path_len = collections.defaultdict(int)
-        self.sess_count = 0
+        self.req_path_len = dict()
+        self.cont_path_len = dict()
+        self.sess_count = dict()
+        for i in range(threads):
+            self.req_path_len[i] = 0
+            self.cont_path_len[i] = 0
+            self.sess_count[i] = 0
         self.mean_req_stretch = 0.0
         self.mean_cont_stretch = 0.0
         self.mean_stretch = 0.0
@@ -476,30 +488,30 @@ class PathStretchCollector(DataCollector):
             self.stretch_data = collections.deque()
 
     @inheritdoc(DataCollector)
-    def start_session(self, timestamp, receiver, content):
+    def start_session(self, timestamp, receiver, content, inx):
         self.receiver = receiver
         self.source = self.view.content_source(content)
-        self.req_path_len = 0
-        self.cont_path_len = 0
-        self.sess_count += 1
+        self.req_path_len[inx] = 0
+        self.cont_path_len[inx] = 0
+        self.sess_count[inx] += 1
 
     @inheritdoc(DataCollector)
-    def request_hop(self, u, v, main_path=True):
-        self.req_path_len += 1
+    def request_hop(self, u, v, inx, main_path=True):
+        self.req_path_len[inx] += 1
 
     @inheritdoc(DataCollector)
-    def content_hop(self, u, v, size, main_path=True):
-        self.cont_path_len += 1
+    def content_hop(self, u, v, size, inx,  main_path=True):
+        self.cont_path_len[inx] += 1
 
     @inheritdoc(DataCollector)
-    def end_session(self, success=True):
+    def end_session(self, inx, success=True):
         if not success:
             return
         req_sp_len = len(self.view.shortest_path(self.receiver, self.source))
         cont_sp_len = len(self.view.shortest_path(self.source, self.receiver))
-        req_stretch = self.req_path_len / req_sp_len
-        cont_stretch = self.cont_path_len / cont_sp_len
-        stretch = (self.req_path_len + self.cont_path_len) / (req_sp_len + cont_sp_len)
+        req_stretch = self.req_path_len[inx] / req_sp_len
+        cont_stretch = self.cont_path_len[inx] / cont_sp_len
+        stretch = (self.req_path_len[inx] + self.cont_path_len[inx]) / (req_sp_len + cont_sp_len)
         self.mean_req_stretch += req_stretch
         self.mean_cont_stretch += cont_stretch
         self.mean_stretch += stretch
@@ -510,14 +522,14 @@ class PathStretchCollector(DataCollector):
 
     @inheritdoc(DataCollector)
     def results(self):
-        results = Tree({'MEAN': self.mean_stretch / self.sess_count,
-                        'MEAN_REQUEST': self.mean_req_stretch / self.sess_count,
-                        'MEAN_CONTENT': self.mean_cont_stretch / self.sess_count})
+        results = Tree({'MEAN': self.mean_stretch / sum(self.sess_count.values()),
+                        'MEAN_REQUEST': self.mean_req_stretch / sum(self.sess_count.values()),
+                        'MEAN_CONTENT': self.mean_cont_stretch / sum(self.sess_count.values())})
         if self.cdf:
             results['CDF'] = cdf(self.stretch_data)
             results['CDF_REQUEST'] = cdf(self.req_stretch_data)
             results['CDF_CONTENT'] = cdf(self.cont_stretch_data)
-        print ("Path Stretch Sessions ", self.sess_count)
+        print ("Path Stretch Sessions ", sum(self.sess_count.values()))
         return results
 
 
@@ -538,33 +550,33 @@ class DummyCollector(DataCollector):
         self.view = view
 
     @inheritdoc(DataCollector)
-    def start_session(self, timestamp, receiver, content):
+    def start_session(self, timestamp, receiver, content, inx):
         self.session = dict(timestamp=timestamp, receiver=receiver,
                             content=content, cache_misses=[],
                             request_hops=[], content_hops=[])
 
     @inheritdoc(DataCollector)
-    def cache_hit(self, node):
+    def cache_hit(self, node, inx):
         self.session['serving_node'] = node
 
     @inheritdoc(DataCollector)
-    def cache_miss(self, node):
+    def cache_miss(self, node, inx):
         self.session['cache_misses'].append(node)
 
     @inheritdoc(DataCollector)
-    def server_hit(self, node):
+    def server_hit(self, node, inx):
         self.session['serving_node'] = node
 
     @inheritdoc(DataCollector)
-    def request_hop(self, u, v, main_path=True):
+    def request_hop(self, u, v, inx, main_path=True):
         self.session['request_hops'].append((u, v))
 
     @inheritdoc(DataCollector)
-    def content_hop(self, u, v, size, main_path=True):
+    def content_hop(self, u, v, size, inx, main_path=True):
         self.session['content_hops'].append((u, v))
 
     @inheritdoc(DataCollector)
-    def end_session(self, success=True):
+    def end_session(self, inx, success=True):
         self.session['success'] = success
 
     def session_summary(self):

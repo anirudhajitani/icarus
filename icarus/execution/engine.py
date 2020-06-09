@@ -88,12 +88,18 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     #manager = mp.Manager()
     #strategy = manager.dict()
     #strategy['key'] =  strategy_inst
-
+    """
+    Problem with this approach is that it just splits it, we need to split ar distance of n
     split_every = (lambda n, workload:
-                takewhile(bool, (list(islice(workload, n)) for _ in repeat(None))))
+                #takewhile(bool, (list(islice(workload, n)) for _ in repeat(None))))
     workload_len = sum(1 for _ in iter(workload))
     requests = list(split_every(int(workload_len/cpus), iter(workload)))
-    #requests = list(mit.distribute(cpus, iter(workload)))
+    """
+    requests = list(mit.distribute(cpus, iter(workload)))
+    list_req = []
+    for r in iter(requests):
+        list_req.append(list(r))
+    del requests
     callbacks = {"callback": experiment_callback}
     lock = th.Lock()
     barrier = th.Barrier(cpus)
@@ -101,9 +107,9 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     print ("BEFORE THREAD CALL")
     #if sys.version_info > (3, 2):
     #    callbacks["error_callback"] = error_callback
-    for inx, req in enumerate(requests):
+    for inx, req in enumerate(list_req):
         #pool.apply_async(process_event, args=(req, strategy), callback=experiment_callback)
-        print (inx, req)
+        #print (inx, req)
         t = th.Thread(target=process_event, args=(lock, barrier, req, strategy_inst, inx)) 
         jobs.append(t)
     for j in jobs:

@@ -21,7 +21,7 @@ N_PROCESSES = cpu_count()
 
 # Number of times each experiment is replicated
 N_REPLICATIONS = 1
-
+WORKLOAD_ITERATIONS = 10
 # Granularity of caching.
 # Currently, only OBJECT is supported
 CACHING_GRANULARITY = 'OBJECT'
@@ -60,8 +60,8 @@ experiment['topology']['asn'] = 1221
 experiment['workload'] = {
          'name':       'STATIONARY',
          'n_contents': 200,
-         'n_warmup':   0.5 * 10 ** 7,
-         'n_measured': 0.1 * 10 ** 7,
+         'n_warmup':   1 * 10 ** 5,
+         'n_measured': 2 * 10 ** 5,
          'alpha':      1.0,
          'rate':       12.0
                        }

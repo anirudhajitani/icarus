@@ -66,6 +66,14 @@ class Orchestrator(object):
         if self.settings.PARALLEL_EXECUTION_RUNS or self.settings.PARALLEL_EXECUTION:
             self.pool.terminate()
             self.pool.join()
+    
+    def generate_workload(self, topology, workload_name, workload_spec):
+        if workload_name not in WORKLOAD:
+            logger.error('No workload implementation named %s was found.'
+                        % workload_name)
+            return None
+        workload_obj = WORKLOAD[workload_name](topology, **workload_spec)
+        return workload_obj
 
     def run(self):
         """Run the orchestrator.
@@ -122,7 +130,7 @@ class Orchestrator(object):
                 for req in requests:
                     #print ("REQ : ", req)
                     job_queue.append(self.pool.apply_async(run_scenario,
-                            args=(self.settings, experiment,
+                            args=(self.settings, experiment, self,
                                   self.seq.assign(), self.n_exp, req),
                             **callbacks))
             self.pool.close()
@@ -170,7 +178,7 @@ class Orchestrator(object):
                     runs = self.settings.N_REPLICATIONS - len(filter_res._results)
                 for _ in range(runs):
                     job_queue.append(self.pool.apply_async(run_scenario,
-                            args=(self.settings, experiment,
+                            args=(self.settings, experiment, self,
                                   self.seq.assign(), self.n_exp),
                             **callbacks))
             self.pool.close()
@@ -205,7 +213,7 @@ class Orchestrator(object):
                     runs = self.settings.N_REPLICATIONS - len(filter_res._results)
                 for _ in range(runs):
                     self.experiment_callback(run_scenario(self.settings,
-                                            experiment, self.seq.assign(),
+                                            experiment, self, self.seq.assign(),
                                             self.n_exp))
                     if self._stop:
                         self.stop()
@@ -257,7 +265,7 @@ class Orchestrator(object):
                         self.n_success, self.n_fail, n_scheduled, eta)
 
 
-def run_scenario(settings, params, curr_exp, n_exp, requests=None):
+def run_scenario(settings, params, orch, curr_exp, n_exp, requests=None):
     """Run a single scenario experiment
 
     Parameters
@@ -302,12 +310,14 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
         # Set workload
         workload_spec = tree['workload']
         workload_name = workload_spec.pop('name')
+        """
         if workload_name not in WORKLOAD:
             logger.error('No workload implementation named %s was found.'
                          % workload_name)
             return None
         workload = WORKLOAD[workload_name](topology, **workload_spec)
-        
+        """
+        workload = orch.generate_workload(topology, workload_name, workload_spec)
         # Assign caches to nodes
         if 'cache_placement' in tree:
             cachepl_spec = tree['cache_placement']
@@ -388,7 +398,8 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
 
         collectors = {m: {} for m in metrics}
         logger.info('Experiment %d/%d | Start simulation', curr_exp, n_exp)
-        results = exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp, settings.N_REPLICATIONS)
+        workload_iterations = settings.WORKLOAD_ITERATIONS
+        results = exec_experiment(topology, workload, orch, workload_name, workload_spec, workload_iterations, requests, netconf, strategy, cache_policy, collectors, nnp, settings.N_REPLICATIONS)
 
         duration = time.time() - start_time
         logger.info('Experiment %d/%d | End simulation | Duration %s.',
@@ -397,9 +408,14 @@ def run_scenario(settings, params, curr_exp, n_exp, requests=None):
     except KeyboardInterrupt:
         logger.error('Received keyboard interrupt. Terminating')
         sys.exit(-signal.SIGINT)
+    except:
+        print(traceback.format_exc())
+        print(sys.exc_info()[2])
+    """
     except Exception as e:
         err_type = str(type(e)).split("'")[1].split(".")[1]
         err_message = e.message
         logger.error('Experiment %d/%d | Failed | %s: %s\n%s',
                      curr_exp, n_exp, err_type, err_message,
                      traceback.format_exc())
+    """

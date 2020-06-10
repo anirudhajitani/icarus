@@ -31,7 +31,7 @@ def process_event(lock, barrier, requests, strategy, inx):
         strategy.process_event(req[0], lock, barrier, inx, i+1, **req[1])
 
 
-def exec_experiment(topology, workload, requests, netconf, strategy, cache_policy, collectors, nnp, n_rep):
+def exec_experiment(topology, workload, orch, workload_name, workload_spec, workload_iterations, requests, netconf, strategy, cache_policy, collectors, nnp, n_rep):
     """Execute the simulation of a specific scenario.
 
     Parameters
@@ -95,27 +95,30 @@ def exec_experiment(topology, workload, requests, netconf, strategy, cache_polic
     workload_len = sum(1 for _ in iter(workload))
     requests = list(split_every(int(workload_len/cpus), iter(workload)))
     """
-    requests = list(mit.distribute(cpus, iter(workload)))
-    list_req = []
-    for r in iter(requests):
-        list_req.append(list(r))
-    del requests
-    callbacks = {"callback": experiment_callback}
-    lock = th.Lock()
-    barrier = th.Barrier(cpus)
-    jobs = []
-    print ("BEFORE THREAD CALL")
-    #if sys.version_info > (3, 2):
-    #    callbacks["error_callback"] = error_callback
-    for inx, req in enumerate(list_req):
-        #pool.apply_async(process_event, args=(req, strategy), callback=experiment_callback)
-        #print (inx, req)
-        t = th.Thread(target=process_event, args=(lock, barrier, req, strategy_inst, inx)) 
-        jobs.append(t)
-    for j in jobs:
-        j.start()
-    for j in jobs:
-        j.join()
+    for it in range(workload_iterations):
+        if it != 0:
+            workload = orch.generate_workload(topology, workload_name, workload_spec)
+        requests = list(mit.distribute(cpus, iter(workload)))
+        list_req = []
+        for r in iter(requests):
+            list_req.append(list(r))
+        del requests
+        callbacks = {"callback": experiment_callback}
+        lock = th.Lock()
+        barrier = th.Barrier(cpus)
+        jobs = []
+        print ("BEFORE THREAD CALL")
+        #if sys.version_info > (3, 2):
+        #    callbacks["error_callback"] = error_callback
+        for inx, req in enumerate(list_req):
+            #pool.apply_async(process_event, args=(req, strategy), callback=experiment_callback)
+            #print (it, inx, req)
+            t = th.Thread(target=process_event, args=(lock, barrier, req, strategy_inst, inx)) 
+            jobs.append(t)
+        for j in jobs:
+            j.start()
+        for j in jobs:
+            j.join()
     #pool.close()
     #pool.join()
     #time.sleep(60)

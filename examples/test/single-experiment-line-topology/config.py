@@ -60,8 +60,8 @@ experiment['topology']['asn'] = 1221
 experiment['workload'] = {
          'name':       'STATIONARY',
          'n_contents': 200,
-         'n_warmup':   1 * 10 ** 3,
-         'n_measured': 5 * 10 ** 3,
+         'n_warmup':   1 * 10 ** 5,
+         'n_measured': 5 * 10 ** 5,
          'alpha':      1.0,
          'rate':       12.0
                        }

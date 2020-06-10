@@ -692,6 +692,9 @@ class RlDec2F(Strategy):
                     self.view.agents[agent_inx].update2()
         # update the rewards for the episode
         #self.view.common_rewards -= min_delay
+        if log:
+            self.view.tot_delay += (min_delay * 2)
+        print ("DELAY ", serving_node, " , ", min_delay, " DEL ", self.view.tot_delay) 
         lock.release()
         
         """

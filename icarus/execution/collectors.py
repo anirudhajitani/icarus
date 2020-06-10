@@ -241,6 +241,9 @@ class LinkLoadCollector(DataCollector):
         self.view = view
         self.req_count = collections.defaultdict(int)
         self.cont_count = collections.defaultdict(int)
+        for i in range(threads):
+            self.req_count[i] = collections.defaultdict(int)
+            self.cont_count[i] = collections.defaultdict(int)
         if req_size <= 0 or content_size <= 0:
             raise ValueError('req_size and content_size must be positive')
         self.req_size = req_size
@@ -256,20 +259,31 @@ class LinkLoadCollector(DataCollector):
 
     @inheritdoc(DataCollector)
     def request_hop(self, u, v, inx, main_path=True):
-        self.req_count[(u, v)] += 1
+        self.req_count[inx][(u, v)] += 1
 
     @inheritdoc(DataCollector)
     def content_hop(self, u, v, size, inx, main_path=True):
         #size here instead of count to reflect the actual size used
-        self.cont_count[(u, v)] += size
+        self.cont_count[inx][(u, v)] += size
 
     @inheritdoc(DataCollector)
     def results(self):
         duration = self.t_end - self.t_start
-        used_links = set(self.req_count.keys()).union(set(self.cont_count.keys()))
+        req_count_keys = set()
+        for i in range(len(self.req_count.keys())):
+            k = [key.keys() for key in self.req_count.values()][i]
+            for link in k:
+                req_count_keys.add(link)
+        cont_count_keys = set()
+        for i in range(len(self.cont_count.keys())):
+            k = [key.keys() for key in self.cont_count.values()][i]
+            for link in k:
+                cont_count_keys.add(link)
+        used_links = req_count_keys.union(cont_count_keys)
+        #used_links = set(self.req_count.keys()).union(set(self.cont_count.keys()))
         print ("USED LINKS ", used_links)
-        link_loads = {link: (self.req_size * self.req_count[link] +
-                             self.content_size * self.cont_count[link]) / duration
+        link_loads = {link: (self.req_size * sum(d[link] for d in self.req_count.values() if d) +
+                             self.content_size * sum(d[link] for d in self.cont_count.values() if d)) / duration
                       for link in used_links}
         print ("LINK LOADS ", link_loads)
         link_loads_int = {link: load
@@ -382,19 +396,26 @@ class CacheHitRatioCollector(DataCollector):
         self.cache_hits = dict()
         self.serv_hits = dict()
         self.off_path_hit_count = dict()
+        if per_node:
+            self.per_node_cache_hits = collections.defaultdict(int)
+            self.per_node_server_hits = collections.defaultdict(int)
+        if content_hits:
+            self.curr_cont = dict()
+            self.cont_cache_hits = collections.defaultdict(int)
+            self.cont_serv_hits = collections.defaultdict(int)
         for i in range(threads):
             self.sess_count[i] = 0
             self.cache_hits[i] = 0
             self.serv_hits[i] = 0
             if off_path_hits:
                 self.off_path_hit_count[i] = 0
-        if per_node:
-            self.per_node_cache_hits = collections.defaultdict(int)
-            self.per_node_server_hits = collections.defaultdict(int)
-        if content_hits:
-            self.curr_cont = None
-            self.cont_cache_hits = collections.defaultdict(int)
-            self.cont_serv_hits = collections.defaultdict(int)
+            if per_node:
+                self.per_node_cache_hits[i] = collections.defaultdict(int)
+                self.per_node_server_hits[i] = collections.defaultdict(int)
+            if content_hits:
+                self.curr_cont[i] = None
+                self.cont_cache_hits[i] = collections.defaultdict(int)
+                self.cont_serv_hits[i] = collections.defaultdict(int) 
 
     @inheritdoc(DataCollector)
     def start_session(self, timestamp, receiver, content, inx):
@@ -409,21 +430,23 @@ class CacheHitRatioCollector(DataCollector):
     @inheritdoc(DataCollector)
     def cache_hit(self, node, inx):
         self.cache_hits[inx] += 1
+        print ("SESS COUNT ", sum(self.sess_count.values()), sum(self.serv_hits.values()), sum(self.cache_hits.values()), inx)
         if self.off_path_hits and node not in self.curr_path:
             self.off_path_hit_count[inx] += 1
         if self.cont_hits:
-            self.cont_cache_hits[self.curr_cont] += 1
+            self.cont_cache_hits[inx][self.curr_cont[inx]] += 1
         if self.per_node:
-            self.per_node_cache_hits[node] += 1
+            self.per_node_cache_hits[inx][node] += 1
             #print ("Cache Hit !!!! ")
 
     @inheritdoc(DataCollector)
     def server_hit(self, node, inx):
+        print ("SESS COUNT ", sum(self.sess_count.values()), sum(self.serv_hits.values()), sum(self.cache_hits.values()), inx)
         self.serv_hits[inx] += 1
         if self.cont_hits:
-            self.cont_serv_hits[self.curr_cont] += 1
+            self.cont_serv_hits[inx][self.curr_cont[inx]] += 1
         if self.per_node:
-            self.per_node_server_hits[node] += 1
+            self.per_node_server_hits[inx][node] += 1
 
     @inheritdoc(DataCollector)
     def results(self):
@@ -436,20 +459,48 @@ class CacheHitRatioCollector(DataCollector):
             results['MEAN_OFF_PATH'] = sum(self.off_path_hit_count.values()) / n_sess
             results['MEAN_ON_PATH'] = results['MEAN'] - results['MEAN_OFF_PATH']
         if self.cont_hits:
-            cont_set = set(list(self.cont_cache_hits.keys()) + list(self.cont_serv_hits.keys()))
+            cont_set_cache = set()
+            cont_set_server = set()
+            for i in range(len(self.cont_cache_hits.keys())):
+                k = [key.keys() for key in self.cont_cache_hits.values()][i]
+                for node in k:
+                    cont_set_cache.add(node)
+            for i in range(len(self.cont_serv_hits.keys())):
+                k = [key.keys() for key in self.cont_serv_hits.values()][i]
+                for node in k:
+                    cont_set_server.add(node)
+            #cont_set = set(list(self.cont_cache_hits.keys()) + list(self.cont_serv_hits.keys()))
+            cont_set = cont_set_cache.union(cont_set_server)
             cont_hits = {i: (
-                                self.cont_cache_hits[i] /
-                                (self.cont_cache_hits[i] + self.cont_serv_hits[i])
+                                sum(d[i] for d in self.cont_cache_hits.values() if d) /
+                                (sum(d[i] for d in self.cont_cache_hits.values() if d) + sum(d[i] for d in self.cont_serv_hits.values() if d))
                             )
                          for i in cont_set}
             results['PER_CONTENT'] = cont_hits
         if self.per_node:
-            for v in self.per_node_cache_hits:
-                self.per_node_cache_hits[v] /= n_sess
-            for v in self.per_node_server_hits:
-                self.per_node_server_hits[v] /= n_sess
-            results['PER_NODE_CACHE_HIT_RATIO'] = self.per_node_cache_hits
-            results['PER_NODE_SERVER_HIT_RATIO'] = self.per_node_server_hits
+            per_node_cache = set()
+            per_node_server = set()
+            for i in range(len(self.per_node_cache_hits.keys())):
+                k = [key.keys() for key in self.per_node_cache_hits.values()][i]
+                for node in k:
+                    per_node_cache.add(node)
+            for i in range(len(self.per_node_server_hits.keys())):
+                k = [key.keys() for key in self.per_node_server_hits.values()][i]
+                for node in k:
+                    per_node_server.add(node)
+            #for v in self.per_node_cache_hits.values():
+            per_node_cache_hit = dict()
+            per_node_server_hit = dict()
+            for v in per_node_cache:
+                per_node_cache_hit[v] = sum(d[v] for d in self.per_node_cache_hits.values() if d) / n_sess
+                #self.per_node_cache_hits[v] /= n_sess
+            #for v in self.per_node_server_hits.values():
+            for v in per_node_server:
+                per_node_server_hit[v] = sum(d[v] for d in self.per_node_server_hits.values() if d) / n_sess
+                #self.per_node_server_hits[v] /= n_sess
+            
+            results['PER_NODE_CACHE_HIT_RATIO'] = per_node_cache_hit
+            results['PER_NODE_SERVER_HIT_RATIO'] = per_node_server_hit
         #print ("RESULTS END")
         return results
 
@@ -475,10 +526,14 @@ class PathStretchCollector(DataCollector):
         self.req_path_len = dict()
         self.cont_path_len = dict()
         self.sess_count = dict()
+        self.receiver = dict()
+        self.source = dict()
         for i in range(threads):
             self.req_path_len[i] = 0
             self.cont_path_len[i] = 0
             self.sess_count[i] = 0
+            self.receiver[i] = None
+            self.source[i] = None
         self.mean_req_stretch = 0.0
         self.mean_cont_stretch = 0.0
         self.mean_stretch = 0.0
@@ -489,8 +544,8 @@ class PathStretchCollector(DataCollector):
 
     @inheritdoc(DataCollector)
     def start_session(self, timestamp, receiver, content, inx):
-        self.receiver = receiver
-        self.source = self.view.content_source(content)
+        self.receiver[inx] = receiver
+        self.source[inx] = self.view.content_source(content)
         self.req_path_len[inx] = 0
         self.cont_path_len[inx] = 0
         self.sess_count[inx] += 1
@@ -507,8 +562,8 @@ class PathStretchCollector(DataCollector):
     def end_session(self, inx, success=True):
         if not success:
             return
-        req_sp_len = len(self.view.shortest_path(self.receiver, self.source))
-        cont_sp_len = len(self.view.shortest_path(self.source, self.receiver))
+        req_sp_len = len(self.view.shortest_path(self.receiver[inx], self.source[inx]))
+        cont_sp_len = len(self.view.shortest_path(self.source[inx], self.receiver[inx]))
         req_stretch = self.req_path_len[inx] / req_sp_len
         cont_stretch = self.cont_path_len[inx] / cont_sp_len
         stretch = (self.req_path_len[inx] + self.cont_path_len[inx]) / (req_sp_len + cont_sp_len)

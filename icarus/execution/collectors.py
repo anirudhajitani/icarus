@@ -281,19 +281,19 @@ class LinkLoadCollector(DataCollector):
                 cont_count_keys.add(link)
         used_links = req_count_keys.union(cont_count_keys)
         #used_links = set(self.req_count.keys()).union(set(self.cont_count.keys()))
-        print ("USED LINKS ", used_links)
+        #print ("USED LINKS ", used_links)
         link_loads = {link: (self.req_size * sum(d[link] for d in self.req_count.values() if d) +
                              self.content_size * sum(d[link] for d in self.cont_count.values() if d)) / duration
                       for link in used_links}
-        print ("LINK LOADS ", link_loads)
+        #print ("LINK LOADS ", link_loads)
         link_loads_int = {link: load
                           for link, load in link_loads.items()
                           if self.view.link_type(*link) == 'internal'}
-        print ("LINK LOADS_INT ", link_loads_int)
+        #print ("LINK LOADS_INT ", link_loads_int)
         link_loads_ext = {link: load
                           for link, load in link_loads.items()
                           if self.view.link_type(*link) == 'external'}
-        print ("LINK LOADS_EXT ", link_loads_int)
+        #print ("LINK LOADS_EXT ", link_loads_int)
         mean_load_int = sum(link_loads_int.values()) / len(link_loads_int) \
                         if len(link_loads_int) > 0 else 0
         mean_load_ext = sum(link_loads_ext.values()) / len(link_loads_ext) \
@@ -340,14 +340,14 @@ class LatencyCollector(DataCollector):
     def request_hop(self, u, v, inx, main_path=True):
         if main_path:
             self.sess_latency[inx] += self.view.link_delay(u, v)
-            print ("REQUEST HOP ", u, v, inx, self.sess_latency[inx])
+            #print ("REQUEST HOP ", u, v, inx, self.sess_latency[inx])
 
     @inheritdoc(DataCollector)
     def content_hop(self, u, v, size, inx, main_path=True):
         if main_path:
             #Multiply by size of file 
             self.sess_latency[inx] += (self.view.link_delay(u, v))
-            print ("CONTENT HOP ", u, v, inx, self.sess_latency[inx])
+            #print ("CONTENT HOP ", u, v, inx, self.sess_latency[inx])
 
     @inheritdoc(DataCollector)
     def end_session(self, inx, success=True):
@@ -356,7 +356,7 @@ class LatencyCollector(DataCollector):
         if self.cdf:
             self.latency_data.append(self.sess_latency[inx])
         self.latency += self.sess_latency[inx]
-        print ("LATENCY AFTER SESSION ", inx, self.sess_count, self.latency)
+        #print ("LATENCY AFTER SESSION ", inx, self.sess_count, self.latency)
 
     @inheritdoc(DataCollector)
     def results(self):
@@ -430,7 +430,7 @@ class CacheHitRatioCollector(DataCollector):
     @inheritdoc(DataCollector)
     def cache_hit(self, node, inx):
         self.cache_hits[inx] += 1
-        print ("SESS COUNT ", sum(self.sess_count.values()), sum(self.serv_hits.values()), sum(self.cache_hits.values()), inx)
+        #print ("SESS COUNT ", sum(self.sess_count.values()), sum(self.serv_hits.values()), sum(self.cache_hits.values()), inx)
         if self.off_path_hits and node not in self.curr_path:
             self.off_path_hit_count[inx] += 1
         if self.cont_hits:
@@ -441,7 +441,7 @@ class CacheHitRatioCollector(DataCollector):
 
     @inheritdoc(DataCollector)
     def server_hit(self, node, inx):
-        print ("SESS COUNT ", sum(self.sess_count.values()), sum(self.serv_hits.values()), sum(self.cache_hits.values()), inx)
+        #print ("SESS COUNT ", sum(self.sess_count.values()), sum(self.serv_hits.values()), sum(self.cache_hits.values()), inx)
         self.serv_hits[inx] += 1
         if self.cont_hits:
             self.cont_serv_hits[inx][self.curr_cont[inx]] += 1
@@ -450,7 +450,7 @@ class CacheHitRatioCollector(DataCollector):
 
     @inheritdoc(DataCollector)
     def results(self):
-        print ("RESULTS BEGIN")
+        #print ("RESULTS BEGIN")
         n_sess = sum(self.cache_hits.values()) + sum(self.serv_hits.values())
         print ("Cache Hit Sessions", n_sess)
         hit_ratio = sum(self.cache_hits.values()) / n_sess

@@ -447,7 +447,7 @@ class Agent(object):
 
         Training code. Calculates actor and critic loss and performn backpropogation.
         """
-        print ("UPDATE FN")
+        #print ("UPDATE FN")
         R = 0
         saved_actions = self.policy.saved_actions
         policy_losses = [] # list to save actor (policy) loss
@@ -464,10 +464,10 @@ class Agent(object):
         returns = torch.tensor(returns, device=device)
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
         #print ("Returns ", returns)
-        print ("RETURNS LEN", len(returns))
+        #print ("RETURNS LEN", len(returns))
 
         #print ("Saved Actions", saved_actions)
-        print ("SAVED ACTIONS LEN", len(saved_actions))
+        #print ("SAVED ACTIONS LEN", len(saved_actions))
         for (log_prob, value), R in zip(saved_actions, returns):
             advantage = R - value.item()
 
@@ -486,8 +486,8 @@ class Agent(object):
         loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum()
         #print ("Total Loss ", loss)
         # perform backprop
-        loss.backward(retain_graph=True)
-        #loss.backward()
+        #loss.backward(retain_graph=True)
+        loss.backward()
         #print ("Backprop Loss")
         #torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
         #print ("Gradients Clip")

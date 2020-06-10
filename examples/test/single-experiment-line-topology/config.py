@@ -30,7 +30,7 @@ CACHING_GRANULARITY = 'OBJECT'
 # Result readers and writers are located in module ./icarus/results/readwrite.py
 # Currently only PICKLE is supported
 RESULTS_FORMAT = 'PICKLE'
-RESULTS_RESUME = 0
+RESULTS_RESUME = 1
 # List of metrics to be measured in the experiments
 # The implementation of data collectors are located in ./icarus/execution/collectors.py
 DATA_COLLECTORS = ['CACHE_HIT_RATIO', 'LATENCY', 'LINK_LOAD', 'PATH_STRETCH']

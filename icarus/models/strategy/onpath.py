@@ -196,6 +196,8 @@ class Index(Strategy):
         lock.acquire()
         self.controller.start_session(time, receiver, content, inx, log, count)
         self.view.count += 1
+        if self.view.count % 10000 == 0:
+            print ("COUNT ", self.view.count)
         lock.release()
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
@@ -316,6 +318,8 @@ class IndexDist(Strategy):
         lock.acquire()
         self.controller.start_session(time, receiver, content, inx, log, count)
         self.view.count += 1
+        if self.view.count % 10000 == 0:
+            print ("COUNT ", self.view.count)
         lock.release()
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
@@ -389,7 +393,7 @@ class RlDec1(Strategy):
             end = len(self.view.agents)
         else:
             end = start + self.view.agents_per_thread
-        print ("Index = ", inx, start, end)
+        #print ("Index = ", inx, start, end)
         return start, end
 
     def env_step(self, size, inx, lock, log):
@@ -454,9 +458,9 @@ class RlDec1(Strategy):
         #print ("To be added ", add_contents)
         #print ("To be removed ", remove_contents)
     
+        lock.acquire()
         for rc in remove_contents:
             self.controller.remove_content(cache, inx, rc)
-        lock.acquire()
         rew = 0
         for ac in add_contents:
             # Get location of all nodes that has the content stored
@@ -489,7 +493,7 @@ class RlDec1(Strategy):
     @inheritdoc(Strategy)
     def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
-        print ("PROCESS EVENT", time, receiver, content, log)
+        #print ("PROCESS EVENT", time, receiver, content, log)
         #print ("LOCK : ", lock)
         #print ("ID", id(self), id(self.view), id(self.controller))
         source = self.view.content_source(content)
@@ -499,7 +503,8 @@ class RlDec1(Strategy):
         lock.acquire()
         self.controller.start_session(time, receiver, content, inx, log, count)
         self.view.count += 1
-        print ("COUNT ", self.view.count)
+        if self.view.count % 10000 == 0:
+            print ("COUNT ", self.view.count)
         lock.release()
         #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:
@@ -507,7 +512,7 @@ class RlDec1(Strategy):
             self.env_step(size, inx, lock, log) 
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
-        print ("Content Loc: ", content_loc, content)
+        #print ("Content Loc: ", content_loc, content)
         min_delay = self.view.shortest_path_len(source, receiver)
         #print ("Min Delay ", min_delay) 
         # Finding the path with the minimum delay in the network
@@ -516,7 +521,7 @@ class RlDec1(Strategy):
             delay = self.view.shortest_path_len(receiver, c)
             #print ("Delay : ", receiver, " , ", c, " : ", delay) 
             if delay < min_delay:
-                print ("FOUND IN CACHE : ", c, " content ", receiver)
+                #print ("FOUND IN CACHE : ", c, " content ", receiver)
                 min_delay = delay
                 serving_node = c
 
@@ -539,7 +544,7 @@ class RlDec1(Strategy):
         # update the rewards for the episode
         if log == True:
             self.view.tot_delay += (min_delay * 2)
-        print ("DELAY ", serving_node, " , ", min_delay, " DEL ", self.view.tot_delay, " FETCH DELAY ", self.view.fetch_delay, "TOT_DELAY", self.view.tot_delay + self.view.fetch_delay)
+        #print ("DELAY ", serving_node, " , ", min_delay, " DEL ", self.view.tot_delay, " FETCH DELAY ", self.view.fetch_delay, "TOT_DELAY", self.view.tot_delay + self.view.fetch_delay)
         self.view.common_rewards -= min_delay
         #print ("COMMON REW", min_delay, self.view.common_rewards)
         lock.release()
@@ -621,7 +626,8 @@ class RlDec2F(Strategy):
         lock.acquire()
         self.controller.start_session(time, receiver, content, inx, log, count)
         self.view.count += 1
-        print ("COUNT ", self.view.count)
+        if self.view.count % 10000 == 0:
+            print ("COUNT ", self.view.count)
         lock.release()
         #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:
@@ -694,7 +700,7 @@ class RlDec2F(Strategy):
         #self.view.common_rewards -= min_delay
         if log:
             self.view.tot_delay += (min_delay * 2)
-        print ("DELAY ", serving_node, " , ", min_delay, " DEL ", self.view.tot_delay) 
+        #print ("DELAY ", serving_node, " , ", min_delay, " DEL ", self.view.tot_delay) 
         lock.release()
         
         """
@@ -765,7 +771,8 @@ class RlDec2D(Strategy):
         lock.acquire()
         self.controller.start_session(time, receiver, content, inx, log, count)
         self.view.count += 1
-        print ("COUNT ", self.view.count)
+        if self.view.count % 10000 == 0:
+            print ("COUNT ", self.view.count)
         lock.release()
         #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:

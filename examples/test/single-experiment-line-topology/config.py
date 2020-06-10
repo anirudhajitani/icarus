@@ -50,7 +50,7 @@ experiment['topology']['delay'] = 40
 """
 experiment['topology']['name'] = 'TREE'
 experiment['topology']['k'] = 2
-experiment['topology']['h'] = 3
+experiment['topology']['h'] = 4
 experiment['topology']['delay'] = 30
 """
 experiment['topology']['name'] = 'ROCKET_FUEL'
@@ -60,18 +60,18 @@ experiment['topology']['asn'] = 1221
 experiment['workload'] = {
          'name':       'STATIONARY',
          'n_contents': 200,
-         'n_warmup':   1 * 10 ** 5,
-         'n_measured': 5 * 10 ** 5,
+         'n_warmup':   0.5 * 10 ** 7,
+         'n_measured': 0.1 * 10 ** 7,
          'alpha':      1.0,
          'rate':       12.0
                        }
 
 # NN Parameters
 experiment['nnp']['window'] = 200
-experiment['nnp']['lr'] = 0.02
+experiment['nnp']['lr'] = 0.03
 experiment['nnp']['gamma'] = 0.9
 experiment['nnp']['index_threshold_f'] = experiment['topology']['delay']
-experiment['nnp']['policy_type'] = 0
+experiment['nnp']['policy_type'] = 1
 experiment['nnp']['state_ver'] = 0
 #experiment['nnp']['index_threshold_d'] = (experiment['topology']['delay'] / experiment['workload']['n_contents']) * 2
 

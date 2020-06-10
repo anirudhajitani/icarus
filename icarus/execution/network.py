@@ -486,8 +486,8 @@ class Agent(object):
         loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum()
         #print ("Total Loss ", loss)
         # perform backprop
-        #loss.backward(retain_graph=True)
-        loss.backward()
+        loss.backward(retain_graph=True)
+        #loss.backward()
         #print ("Backprop Loss")
         #torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
         #print ("Gradients Clip")

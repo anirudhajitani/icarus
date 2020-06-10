@@ -398,7 +398,12 @@ def run_scenario(settings, params, orch, curr_exp, n_exp, requests=None):
 
         collectors = {m: {} for m in metrics}
         logger.info('Experiment %d/%d | Start simulation', curr_exp, n_exp)
-        workload_iterations = settings.WORKLOAD_ITERATIONS
+        try:
+            if settings.WORKLOAD_ITERATIONS:
+                workload_iterations = settings.WORKLOAD_ITERATIONS
+        except:
+            workload_iterations = 1 
+        print ("WORKLOAD ITERATIONS", workload_iterations)
         results = exec_experiment(topology, workload, orch, workload_name, workload_spec, workload_iterations, requests, netconf, strategy, cache_policy, collectors, nnp, settings.N_REPLICATIONS)
 
         duration = time.time() - start_time

@@ -22,6 +22,7 @@ N_PROCESSES = cpu_count()
 # Number of times each experiment is replicated
 N_REPLICATIONS = 1
 WORKLOAD_ITERATIONS = 10
+
 # Granularity of caching.
 # Currently, only OBJECT is supported
 CACHING_GRANULARITY = 'OBJECT'
@@ -68,7 +69,7 @@ experiment['workload'] = {
 
 # NN Parameters
 experiment['nnp']['window'] = 200
-experiment['nnp']['lr'] = 0.03
+experiment['nnp']['lr'] = 0.001
 experiment['nnp']['gamma'] = 0.9
 experiment['nnp']['index_threshold_f'] = experiment['topology']['delay']
 experiment['nnp']['policy_type'] = 1

@@ -8,7 +8,6 @@ import time
 import numpy as np
 from icarus.registry import register_strategy
 from icarus.util import inheritdoc, path_links
-
 from .base import Strategy
 
 __all__ = [
@@ -429,6 +428,11 @@ class RlDec1(Strategy):
         for i in range(start, end):
             self.view.agents[i].update()
 
+    def save_model(self, inx, count):
+        start, end = self.get_agent_indexes(inx)
+        #print ("UPGARDE GRADIENTS")
+        for i in range(start, end):
+            self.view.agents[i].save_model(count)
 
     def perform_action(self, action, cache, size, inx, lock):
         """
@@ -444,7 +448,7 @@ class RlDec1(Strategy):
         add_contents = []
         remove_contents = []
         existing_contents = self.view.cache_dump(cache)
-        #print ("EXISTING CONTENTS", existing_contents)
+        #print ("EXISTING CONTENTS", cache, existing_contents)
         #print ("Action", action)
         for a in range(action.size):
             if action[a] == 1:
@@ -455,8 +459,8 @@ class RlDec1(Strategy):
                 if a+1 in existing_contents:
                     remove_contents.append(a+1)
 
-        #print ("To be added ", add_contents)
-        #print ("To be removed ", remove_contents)
+        #print ("To be added ", cache, add_contents)
+        #print ("To be removed ", cache, remove_contents)
     
         lock.acquire()
         for rc in remove_contents:
@@ -504,7 +508,7 @@ class RlDec1(Strategy):
         self.controller.start_session(time, receiver, content, inx, log, count)
         self.view.count += 1
         if self.view.count % 10000 == 0:
-            print ("COUNT ", self.view.count)
+            print ("COUNT ", self.view.count, count)
         lock.release()
         #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:
@@ -521,7 +525,6 @@ class RlDec1(Strategy):
             delay = self.view.shortest_path_len(receiver, c)
             #print ("Delay : ", receiver, " , ", c, " : ", delay) 
             if delay < min_delay:
-                #print ("FOUND IN CACHE : ", c, " content ", receiver)
                 min_delay = delay
                 serving_node = c
 
@@ -529,6 +532,7 @@ class RlDec1(Strategy):
         min_path = self.view.shortest_path(receiver, serving_node)
         lock.acquire()
         for u, v in path_links(min_path):
+            #print ("Min path ", u, v)
             #Need to get rid of inx for indexability
             if v in self.view.model.routers:
                 agent_inx = self.view.model.routers.index(v)
@@ -553,7 +557,9 @@ class RlDec1(Strategy):
             barrier.wait() 
             start, end = self.get_agent_indexes(inx)
             for i in range(start,end):
-                self.view.agents[i].rewards += self.view.common_rewards
+                # Normalize the common rewards by number of agents
+                self.view.agents[i].rewards += (self.view.common_rewards/len(self.view.agents))
+                #self.view.agents[i].rewards += self.view.common_rewards
                 if self.view.agents[i].state_ver == 1:
                     self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
                 else:
@@ -566,9 +572,16 @@ class RlDec1(Strategy):
             self.view.common_rewards *= 0
             barrier.wait()
 
-        if count % (self.view.update_freq * 5) == 0:
+        if count % (self.view.update_freq * 50) == 0:
             #self.view.agents[i].state_counts *= 0
             self.update_gradients(inx)
+        if count % (self.view.update_freq * 100) == 0:
+            #Use barrier here so that the epochs are consistent
+            barrier.wait()
+            #Use self.view.count here so that this value can be restored on next run
+            self.save_model(inx, self.view.count)
+            barrier.wait()
+
         # Return content
         #print ("Serving Node", serving_node)
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
@@ -626,8 +639,12 @@ class RlDec2F(Strategy):
         lock.acquire()
         self.controller.start_session(time, receiver, content, inx, log, count)
         self.view.count += 1
-        if self.view.count % 10000 == 0:
-            print ("COUNT ", self.view.count)
+        if self.view.count % 100 == 0:
+            print ("COUNT ", self.view.count, count)
+        if self.view.count % 1000 == 0:
+            print ("CALLED SAVED MODEL FOR AGENTS")
+            for a in range(len(self.view.agents)):
+                self.view.agents[a].save_model(self.view.count)
         lock.release()
         #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:
@@ -771,8 +788,12 @@ class RlDec2D(Strategy):
         lock.acquire()
         self.controller.start_session(time, receiver, content, inx, log, count)
         self.view.count += 1
-        if self.view.count % 10000 == 0:
-            print ("COUNT ", self.view.count)
+        if self.view.count % 100 == 0:
+            print ("COUNT ", self.view.count, count)
+        if self.view.count % 1000 == 0:
+            print ("GONNA CALL SAVE MODEL")
+            for a in range(len(self.view.agents)):
+                self.view.agents[a].save_model(self.view.count)
         lock.release()
         #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:
@@ -859,7 +880,7 @@ class RlDec2D(Strategy):
         if count % (self.view.update_freq * 5) == 0:
             self.view.agents[i].state_counts *= 0
             self.update_gradients(inx)
-       """ 
+        """ 
         # Return content
         #print ("Serving Node", serving_node)
         path = list(reversed(self.view.shortest_path(receiver, serving_node)))
@@ -885,7 +906,7 @@ class LeaveCopyEverywhere(Strategy):
     @inheritdoc(Strategy)
     def process_event(self, time, lock, barrier, inx, count, receiver, content, size, log):
         # get all required data
-        print ("PROCESS EVENT", time, receiver, content, log)
+        #print ("PROCESS EVENT", time, receiver, content, log)
         source = self.view.content_source(content)
         path = self.view.shortest_path(receiver, source)
         content_loc = self.view.content_locations(content)
@@ -911,7 +932,7 @@ class LeaveCopyEverywhere(Strategy):
             if self.view.has_cache(v):
                 # insert content
                 self.controller.put_content(v, inx)
-        print ("TOT DELAY = ", self.view.tot_delay) 
+        #print ("TOT DELAY = ", self.view.tot_delay) 
         self.controller.end_session(inx)
         lock.release()
 

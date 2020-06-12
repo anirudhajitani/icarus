@@ -226,7 +226,7 @@ class LinkLoadCollector(DataCollector):
     """Data collector measuring the link load
     """
 
-    def __init__(self, view, threads=1, req_size=1, content_size=10):
+    def __init__(self, view, threads, results_dict, n_, routers, edges, req_size=1, content_size=10):
         """Constructor
 
         Parameters
@@ -238,12 +238,18 @@ class LinkLoadCollector(DataCollector):
         content_size : int
             Average size (in byte) of a content
         """
+        print (results_dict, n_)
         self.view = view
+        self.results_dict = results_dict
+        self.n_ = n_
         self.req_count = collections.defaultdict(int)
         self.cont_count = collections.defaultdict(int)
         for i in range(threads):
             self.req_count[i] = collections.defaultdict(int)
             self.cont_count[i] = collections.defaultdict(int)
+            for e in edges:
+                self.req_count[i][e] = 0
+                self.cont_count[i][e] = 0
         if req_size <= 0 or content_size <= 0:
             raise ValueError('req_size and content_size must be positive')
         self.req_size = req_size
@@ -298,6 +304,16 @@ class LinkLoadCollector(DataCollector):
                         if len(link_loads_int) > 0 else 0
         mean_load_ext = sum(link_loads_ext.values()) / len(link_loads_ext) \
                         if len(link_loads_ext) > 0 else 0
+        
+        # Update stats based on average of pervious runs and this one
+        if self.results_dict is not None:
+            for k in link_loads_int.keys():
+                link_loads_int[k] = ((self.results_dict['PER_LINK_INTERNAL'][k] * self.n_) + link_loads_int[k]) / (self.n_ + 1)
+            for k in link_loads_ext.keys():
+                link_loads_ext[k] = ((self.results_dict['PER_LINK_EXTERNAL'][k] * self.n_) + link_loads_ext[k]) / (self.n_ + 1)
+            mean_load_int = ((self.results_dict['MEAN_INTERNAL'] * self.n_) + mean_load_int) / (self.n_ + 1)
+            mean_load_ext = ((self.results_dict['MEAN_EXTERNAL'] * self.n_) + mean_load_ext) / (self.n_ + 1)
+        
         return Tree({'MEAN_INTERNAL':     mean_load_int,
                      'MEAN_EXTERNAL':     mean_load_ext,
                      'PER_LINK_INTERNAL': link_loads_int,
@@ -310,7 +326,7 @@ class LatencyCollector(DataCollector):
     content.
     """
 
-    def __init__(self, view, threads=1, cdf=False):
+    def __init__(self, view, threads, results_dict, n_, routers, edges, cdf=False):
         """Constructor
 
         Parameters
@@ -322,6 +338,8 @@ class LatencyCollector(DataCollector):
         """
         self.cdf = cdf
         self.view = view
+        self.results_dict = results_dict
+        self.n_ = n_
         self.sess_latency = dict()
         self.sess_count = dict()
         for i in range(threads): 
@@ -361,8 +379,11 @@ class LatencyCollector(DataCollector):
     @inheritdoc(DataCollector)
     def results(self):
         print ("Latency Sessions ", sum(self.sess_count.values()))
-        print ("Latency ", self.latency)
-        results = Tree({'MEAN': self.latency / sum(self.sess_count.values())})
+        latency = self.latency / sum(self.sess_count.values())
+        if self.results_dict is not None:
+            latency = (latency + (self.results_dict['MEAN'] * self.n_)) / (self.n_ + 1)
+        print ("Latency ", latency)
+        results = Tree({'MEAN': latency})
         if self.cdf:
             results['CDF'] = cdf(self.latency_data)
         return results
@@ -374,7 +395,7 @@ class CacheHitRatioCollector(DataCollector):
     requests served by a cache.
     """
 
-    def __init__(self, view, threads=1, off_path_hits=False, per_node=True, content_hits=False):
+    def __init__(self, view, threads, results_dict, n_, routers, edges, off_path_hits=False, per_node=True, content_hits=False):
         """Constructor
 
         Parameters
@@ -389,6 +410,8 @@ class CacheHitRatioCollector(DataCollector):
             globally
         """
         self.view = view
+        self.n_ = n_
+        self.results_dict = results_dict
         self.off_path_hits = off_path_hits
         self.per_node = per_node
         self.cont_hits = content_hits
@@ -412,6 +435,8 @@ class CacheHitRatioCollector(DataCollector):
             if per_node:
                 self.per_node_cache_hits[i] = collections.defaultdict(int)
                 self.per_node_server_hits[i] = collections.defaultdict(int)
+                for r in routers:
+                    self.per_node_cache_hits[i][r] = 0 
             if content_hits:
                 self.curr_cont[i] = None
                 self.cont_cache_hits[i] = collections.defaultdict(int)
@@ -430,6 +455,7 @@ class CacheHitRatioCollector(DataCollector):
     @inheritdoc(DataCollector)
     def cache_hit(self, node, inx):
         self.cache_hits[inx] += 1
+        #print ("CACHE HIT", node, inx)
         #print ("SESS COUNT ", sum(self.sess_count.values()), sum(self.serv_hits.values()), sum(self.cache_hits.values()), inx)
         if self.off_path_hits and node not in self.curr_path:
             self.off_path_hit_count[inx] += 1
@@ -441,6 +467,7 @@ class CacheHitRatioCollector(DataCollector):
 
     @inheritdoc(DataCollector)
     def server_hit(self, node, inx):
+        #print ("SERVER HIT", node, inx)
         #print ("SESS COUNT ", sum(self.sess_count.values()), sum(self.serv_hits.values()), sum(self.cache_hits.values()), inx)
         self.serv_hits[inx] += 1
         if self.cont_hits:
@@ -454,9 +481,14 @@ class CacheHitRatioCollector(DataCollector):
         n_sess = sum(self.cache_hits.values()) + sum(self.serv_hits.values())
         print ("Cache Hit Sessions", n_sess)
         hit_ratio = sum(self.cache_hits.values()) / n_sess
+        if self.results_dict is not None:
+            hit_ratio = (hit_ratio + (self.results_dict['MEAN'] * self.n_)) / (self.n_ + 1)
         results = Tree(**{'MEAN': hit_ratio})
         if self.off_path_hits:
-            results['MEAN_OFF_PATH'] = sum(self.off_path_hit_count.values()) / n_sess
+            mean_off_path = sum(self.off_path_hit_count.values()) / n_sess
+            if self.results_dict is not None:
+                mean_off_path = (mean_off_path + (self.results_dict['MEAN_OFF_PATH'] * self.n_)) / (self.n_ + 1)
+            results['MEAN_OFF_PATH'] = mean_off_path
             results['MEAN_ON_PATH'] = results['MEAN'] - results['MEAN_OFF_PATH']
         if self.cont_hits:
             cont_set_cache = set()
@@ -476,7 +508,12 @@ class CacheHitRatioCollector(DataCollector):
                                 (sum(d[i] for d in self.cont_cache_hits.values() if d) + sum(d[i] for d in self.cont_serv_hits.values() if d))
                             )
                          for i in cont_set}
+            if self.results_dict is not None:
+                for k in cont_hits.keys():
+                    cont_hits[k] = ((self.results_dict['PER_CONTENT'][k] * self.n_) + cont_hits[k]) / (self.n_ + 1)
             results['PER_CONTENT'] = cont_hits
+        #print ("Per node cache hit all", self.per_node_cache_hits)
+        #print ("Per node server hit all", self.per_node_server_hits)
         if self.per_node:
             per_node_cache = set()
             per_node_server = set()
@@ -488,6 +525,8 @@ class CacheHitRatioCollector(DataCollector):
                 k = [key.keys() for key in self.per_node_server_hits.values()][i]
                 for node in k:
                     per_node_server.add(node)
+            #print ("Node set", per_node_cache)
+            #print ("Server set", per_node_server)
             #for v in self.per_node_cache_hits.values():
             per_node_cache_hit = dict()
             per_node_server_hit = dict()
@@ -498,7 +537,16 @@ class CacheHitRatioCollector(DataCollector):
             for v in per_node_server:
                 per_node_server_hit[v] = sum(d[v] for d in self.per_node_server_hits.values() if d) / n_sess
                 #self.per_node_server_hits[v] /= n_sess
-            
+            #print ("Per Node Cache Hit", per_node_cache_hit)
+            #print ("Per Node Server Hit", per_node_server_hit)
+            if self.results_dict is not None:
+                #print ("Inside stats")
+                #print (self.results_dict)
+                #print (per_node_cache_hit)
+                for k in per_node_cache_hit.keys():
+                    per_node_cache_hit[k] = ((self.results_dict['PER_NODE_CACHE_HIT_RATIO'][k] * self.n_) + per_node_cache_hit[k]) / (self.n_ + 1)
+                for k in per_node_server_hit.keys():
+                    per_node_server_hit[k] = ((self.results_dict['PER_NODE_SERVER_HIT_RATIO'][k] * self.n_) + per_node_server_hit[k]) / (self.n_ + 1)
             results['PER_NODE_CACHE_HIT_RATIO'] = per_node_cache_hit
             results['PER_NODE_SERVER_HIT_RATIO'] = per_node_server_hit
         #print ("RESULTS END")
@@ -511,7 +559,7 @@ class PathStretchCollector(DataCollector):
     path length and the shortest path length.
     """
 
-    def __init__(self, view, threads, cdf=False):
+    def __init__(self, view, threads, results_dict, n_, routers, edges, cdf=False):
         """Constructor
 
         Parameters
@@ -523,6 +571,8 @@ class PathStretchCollector(DataCollector):
         """
         self.view = view
         self.cdf = cdf
+        self.n_ = n_
+        self.results_dict = results_dict
         self.req_path_len = dict()
         self.cont_path_len = dict()
         self.sess_count = dict()
@@ -577,9 +627,17 @@ class PathStretchCollector(DataCollector):
 
     @inheritdoc(DataCollector)
     def results(self):
-        results = Tree({'MEAN': self.mean_stretch / sum(self.sess_count.values()),
-                        'MEAN_REQUEST': self.mean_req_stretch / sum(self.sess_count.values()),
-                        'MEAN_CONTENT': self.mean_cont_stretch / sum(self.sess_count.values())})
+        mean_stretch = self.mean_stretch / sum(self.sess_count.values())
+        mean_req_stretch = self.mean_req_stretch / sum(self.sess_count.values())
+        mean_cont_stretch = self.mean_cont_stretch / sum(self.sess_count.values())
+        if self.results_dict is not None:
+            mean_stretch = (mean_stretch + (self.results_dict['MEAN'] * self.n_)) / (self.n_ + 1)
+            mean_req_stretch = (mean_req_stretch + (self.results_dict['MEAN_REQUEST'] * self.n_)) / (self.n_ + 1)
+            mean_cont_stretch = (mean_cont_stretch + (self.results_dict['MEAN_CONTENT'] * self.n_)) / (self.n_ + 1)
+        
+        results = Tree({'MEAN': mean_stretch, 
+                        'MEAN_REQUEST': mean_req_stretch, 
+                        'MEAN_CONTENT': mean_cont_stretch}) 
         if self.cdf:
             results['CDF'] = cdf(self.stretch_data)
             results['CDF_REQUEST'] = cdf(self.req_stretch_data)

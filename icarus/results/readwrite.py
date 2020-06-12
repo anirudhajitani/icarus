@@ -243,5 +243,8 @@ def read_results_pickle(path):
     results : ResultSet
         The read result set
     """
-    with open(path, 'rb') as pickle_file:
-        return pickle.load(pickle_file)
+    try:
+        with open(path, 'rb') as pickle_file:
+            return pickle.load(pickle_file)
+    except:
+        return None

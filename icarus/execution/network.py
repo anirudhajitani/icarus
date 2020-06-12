@@ -184,7 +184,7 @@ class RNNPolicy(nn.Module):
         # by returning probability of each action
         action_prob = F.softmax(self.action_head(x), dim=-1)
         action_prob = action_prob.view(batch_size, -1)
-        action_prob = action_prob[:,-1]
+        #action_prob = action_prob[:,-1]
 
         # critic evaluates being in state s_t
         state_values = self.value_head(x)
@@ -313,6 +313,9 @@ class Agent(object):
             except:
                 print(traceback.format_exc())
                 print(sys.exc_info()[2])
+            
+            if self.view.resume == True:
+                self.load_model()
 
         if self.view.strategy_name in ['RL_DEC_2F', 'RL_DEC_2D']:
             try:
@@ -333,7 +336,9 @@ class Agent(object):
             except:
                 print(traceback.format_exc())
                 print(sys.exc_info()[2])
-
+        
+            if self.view.resume == True:
+                self.load_model()
 
     def get_state(self):
         """
@@ -343,7 +348,60 @@ class Agent(object):
             return self.state_counts
         if self.view.strategy_name in ['RL_DEC_2D']:
             return self.prob
-    
+   
+    def save_model(self, count):
+        """
+        Save NN model parameters 
+        """
+        PATH = self.view.model_path
+        if PATH is not None:
+            PATH = PATH + "/" + str(self.view.strategy_name) + "agent_" + str(self.cache) + ".pt"
+        else:
+            PATH = str(self.view.strategy_name) + "agent_" + str(self.cache) + ".pt"
+        if self.view.strategy_name in ['RL_DEC_2F', 'RL_DEC_2D']:
+            torch.save({
+                'epoch': count,
+                'model_state_dict': self.policy.state_dict(),
+                'model2_state_dict': self.policy2.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'optimizer2_state_dict': self.optimizer2.state_dict(),
+                }, PATH)
+        else:
+            torch.save({
+                'epoch': count,
+                'model_state_dict': self.policy.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                }, PATH)
+        print ("Saved Model to ", PATH)
+
+    def load_model(self):
+        """
+        Load NN model and initialise them
+        """
+        PATH = self.view.model_path
+        if PATH is not None:
+            PATH = PATH + "/" + str(self.view.strategy_name) + "agent_" + str(self.cache) + ".pt"
+        else:
+            PATH = str(self.view.strategy_name) + "agent_" + str(self.cache) + ".pt"
+        try:
+            checkpoint = torch.load(PATH)
+        except:
+            print ("CHECKPOINT not present.. Cannot LOAD Model")
+            return
+        print ("LOADING MODELS previously stored")
+        #print ("MODEL : ", checkpoint['model_state_dict'])
+        #print ("OPTIM : ", checkpoint['optimizer_state_dict'])
+        try:
+            self.policy.load_state_dict(checkpoint['model_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if self.view.strategy_name in ['RL_DEC_2F', 'RL_DEC_2D']:
+                self.policy2.load_state_dict(checkpoint['model2_state_dict'])
+                self.optimizer2.load_state_dict(checkpoint['optimizer2_state_dict'])
+            # Restore count from where it left off
+            self.view.count = checkpoint['epoch']
+        except:
+            print ("Saved Model does not match the Policy")
+
     def get_cache_dump(self):
         """ 
             Return cache dump of node
@@ -447,7 +505,7 @@ class Agent(object):
 
         Training code. Calculates actor and critic loss and performn backpropogation.
         """
-        #print ("UPDATE FN")
+        print ("UPDATE FN ", self.cache)
         R = 0
         saved_actions = self.policy.saved_actions
         policy_losses = [] # list to save actor (policy) loss
@@ -456,15 +514,23 @@ class Agent(object):
 
         # calculate the true value using rewards returned from the environment
         # this reward is appended by the environment 
+        c = 0
         for r in self.policy.rewards[::-1]:
             # calculate the discounted value
             #print ("Reward : ", r)
-            R = r + self.gamma * R
+            # Rewards are same for multiple actions, hence compute R only once & use it for all actions taken simultaneously
+            if self.view.strategy_name in ['RL_DEC_1']:
+                if c % self.cache_size == 0:
+                    R = r + self.gamma * R
+            else:
+                R = r + self.gamma * R
+            c += 1
             returns.insert(0, R)
+        #print ("Returns ", self.cache, returns)
         returns = torch.tensor(returns, device=device)
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
-        #print ("Returns ", returns)
-        #print ("RETURNS LEN", len(returns))
+        #print ("Returns ", self.cache, returns)
+        #print ("RETURNS LEN", self.cache, len(returns))
 
         #print ("Saved Actions", saved_actions)
         #print ("SAVED ACTIONS LEN", len(saved_actions))
@@ -566,7 +632,7 @@ class NetworkView(object):
     characteristics of links and currently cached objects in nodes.
     """
 
-    def __init__(self, model, cpus, nnp, strategy_name):
+    def __init__(self, model, cpus, nnp, strategy_name, model_path, resume):
         """Constructor
 
         Parameters
@@ -579,6 +645,8 @@ class NetworkView(object):
                              'NetworkModel')
         #TODO - objects allocate only based on strategy (no need to assign data if not used
         self.model = model
+        self.model_path = model_path
+        self.resume = resume
         self.count = 0
         self.common_rewards = 0
         self.tot_delay = 0
@@ -594,9 +662,9 @@ class NetworkView(object):
         if 'gamma' not in nnp:
             nnp['gamma'] = 0.9
         if 'window' not in nnp:
-            nnp['window'] = 250
+            nnp['window'] = 500
         if 'update_freq' not in nnp:
-            nnp['update_freq'] = 100
+            nnp['update_freq'] = 50
         if 'state_ver' not in nnp:
             nnp['state_ver'] = 0
         if 'policy_type' not in nnp:
@@ -964,6 +1032,8 @@ class NetworkModel(object):
         self.source_node = {}
         #List of all routers in the topology
         self.routers = []
+        self.edges = nx.edges(topology)
+        print ("EDGES", self.edges)
         #List of all files in the library
         self.library = set()
         # Color dictionary
@@ -1225,10 +1295,12 @@ class NetworkController(object):
         content : bool
             True if the content is available, False otherwise
         """
+        #print ("GET CONTENT", node, inx)
         if node in self.model.cache and content is not None:
             return self.model.cache[node].get(content)
         if node in self.model.cache:
             cache_hit = self.model.cache[node].get(self.session[inx]['content'], inx)
+            #print ("NODE IS ROUTER", node, inx, cache_hit)
             if cache_hit:
                 if self.session[inx]['log']:
                     self.collector.cache_hit(node, inx)
@@ -1240,6 +1312,7 @@ class NetworkController(object):
         if name == 'source' and self.session[inx]['content'] in props['contents']:
             if self.collector is not None and self.session[inx]['log']:
                 self.collector.server_hit(node, inx)
+                #print ("NODE IS SERVER", node, inx)
             return True
         else:
             return False

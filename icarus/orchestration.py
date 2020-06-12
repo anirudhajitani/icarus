@@ -130,7 +130,7 @@ class Orchestrator(object):
                 for req in requests:
                     #print ("REQ : ", req)
                     job_queue.append(self.pool.apply_async(run_scenario,
-                            args=(self.settings, experiment, self,
+                            args=(self.settings, experiment,
                                   self.seq.assign(), self.n_exp, req),
                             **callbacks))
             self.pool.close()
@@ -167,19 +167,30 @@ class Orchestrator(object):
                 experiment = queue.popleft()
                 runs = self.settings.N_REPLICATIONS
                 if self.settings.RESULTS_RESUME == 1:
+                    result_dict = None
                     res_op = RESULTS_READER[self.settings.RESULTS_FORMAT](self.output)
-                    pprint (vars(res_op))
-                    for res in res_op:
-                        self.results.add(res[0], res[1])
-                    filter_res = res_op.filter(experiment)
-                    #pprint (vars(filter_res))
-                    if len(filter_res._results) == self.settings.N_REPLICATIONS:
-                        print ("EXPERIMENT ALREADY IN RESULTS")
-                    runs = self.settings.N_REPLICATIONS - len(filter_res._results)
+                    #pprint (vars(res_op))
+                    if res_op is not None:
+                        filter_res = res_op.filter(experiment)
+                        for res in res_op:
+                            filtered = filter_res.filter(res[0])
+                            # Do not add results if already present equal to N_REPLICATIONS
+                            # Else it will cause bombardment of results when run for multiple iters
+                            if len(filtered) < self.settings.N_REPLICATIONS:
+                                self.results.add(res[0], res[1])
+                            else:
+                                print ("Not adding results back .. currently run this exp")
+                        #pprint (vars(filter_res))
+                        if len(filter_res) != 0:
+                            result_dict = filter_res._results[-1][1].dict()
+                            if len(filter_res._results) == self.settings.N_REPLICATIONS and self.settings.OVERRIDE == False:
+                                print ("EXPERIMENT ALREADY IN RESULTS")
+                            if self.settings.OVERRIDE == False:
+                                runs = self.settings.N_REPLICATIONS - len(filter_res._results)
                 for _ in range(runs):
                     job_queue.append(self.pool.apply_async(run_scenario,
-                            args=(self.settings, experiment, self,
-                                  self.seq.assign(), self.n_exp),
+                            args=(self.settings, experiment,
+                                  self.seq.assign(), self.n_exp, result_dict),
                             **callbacks))
             self.pool.close()
             # This solution is probably not optimal, but at least makes
@@ -203,18 +214,34 @@ class Orchestrator(object):
                 runs = self.settings.N_REPLICATIONS
                 if self.settings.RESULTS_RESUME == 1:
                     res_op = RESULTS_READER[self.settings.RESULTS_FORMAT](self.output)
+                    result_dict = None
                     #pprint (vars(res_op))
-                    for res in res_op:
-                        self.results.add(res[0], res[1])
-                    filter_res = res_op.filter(experiment)
-                    #pprint (vars(filter_res))
-                    if len(filter_res._results) == self.settings.N_REPLICATIONS:
-                        print ("EXPERIMENT ALREADY IN RESULTS")
-                    runs = self.settings.N_REPLICATIONS - len(filter_res._results)
+                    if res_op is not None:
+                        filter_res = res_op.filter(experiment)
+                        print (filter_res, type(filter_res))
+                        #pprint(vars(filter_res))
+                        #pprint(vars(res_op))
+                        for res in res_op:
+                            print (res[0], type(res[0]))
+                            filtered = filter_res.filter(res[0])
+                            # Do not add results if already present equal to N_REPLICATIONS
+                            # Else it will cause bombardment of results when run for multiple iters
+                            if len(filtered) < self.settings.N_REPLICATIONS:
+                                self.results.add(res[0], res[1])
+                            else:
+                                print ("Not adding results back .. currently run this exp")
+                        print (len(filter_res))
+                        #pprint (vars(filter_res))
+                        if len(filter_res) != 0:
+                            result_dict = filter_res._results[-1][1].dict()
+                            if len(filter_res._results) == self.settings.N_REPLICATIONS and self.settings.OVERRIDE == False:
+                                print ("EXPERIMENT ALREADY IN RESULTS")
+                            if self.settings.OVERRIDE == False:
+                                runs = self.settings.N_REPLICATIONS - len(filter_res._results)
                 for _ in range(runs):
                     self.experiment_callback(run_scenario(self.settings,
-                                            experiment, self, self.seq.assign(),
-                                            self.n_exp))
+                                            experiment, self.seq.assign(),
+                                            self.n_exp, result_dict))
                     if self._stop:
                         self.stop()
 
@@ -265,7 +292,7 @@ class Orchestrator(object):
                         self.n_success, self.n_fail, n_scheduled, eta)
 
 
-def run_scenario(settings, params, orch, curr_exp, n_exp, requests=None):
+def run_scenario(settings, params, curr_exp, n_exp, collector_results_dict, requests=None):
     """Run a single scenario experiment
 
     Parameters
@@ -310,14 +337,12 @@ def run_scenario(settings, params, orch, curr_exp, n_exp, requests=None):
         # Set workload
         workload_spec = tree['workload']
         workload_name = workload_spec.pop('name')
-        """
         if workload_name not in WORKLOAD:
             logger.error('No workload implementation named %s was found.'
                          % workload_name)
             return None
         workload = WORKLOAD[workload_name](topology, **workload_spec)
-        """
-        workload = orch.generate_workload(topology, workload_name, workload_spec)
+        #workload = orch.generate_workload(topology, workload_name, workload_spec)
         # Assign caches to nodes
         if 'cache_placement' in tree:
             cachepl_spec = tree['cache_placement']
@@ -403,8 +428,20 @@ def run_scenario(settings, params, orch, curr_exp, n_exp, requests=None):
                 workload_iterations = settings.WORKLOAD_ITERATIONS
         except:
             workload_iterations = 1 
-        print ("WORKLOAD ITERATIONS", workload_iterations)
-        results = exec_experiment(topology, workload, orch, workload_name, workload_spec, workload_iterations, requests, netconf, strategy, cache_policy, collectors, nnp, settings.N_REPLICATIONS)
+        try:
+            if settings.MODEL_PATH:
+                model_path = settings.MODEL_PATH
+        except:
+            model_path = None
+        try:
+            if settings.MODEL_RESUME:
+                model_resume = settings.MODEL_RESUME
+        except:
+            model_resume = False
+        print ("MODEL PATH", model_path)
+        results = exec_experiment(topology, workload, workload_name, workload_spec, workload_iterations, requests, netconf, 
+                                strategy, cache_policy, collectors, nnp, settings.N_REPLICATIONS, model_path, model_resume, 
+                                collector_results_dict)
 
         duration = time.time() - start_time
         logger.info('Experiment %d/%d | End simulation | Duration %s.',

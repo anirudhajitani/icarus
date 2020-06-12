@@ -6,9 +6,10 @@ the experiment by iterating through the event provided by an event generator
 and providing them to a strategy instance.
 """
 from icarus.execution import NetworkModel, NetworkView, NetworkController, CollectorProxy
-from icarus.registry import DATA_COLLECTOR, STRATEGY
+from icarus.registry import DATA_COLLECTOR, STRATEGY, WORKLOAD
 from pprint import pprint
 from itertools import islice, takewhile, repeat
+from icarus.util import Tree
 import more_itertools as mit
 import torch.multiprocessing as mp
 import threading as th
@@ -30,8 +31,17 @@ def process_event(lock, barrier, requests, strategy, inx):
         #print ("IDDDD", id(strategy))
         strategy.process_event(req[0], lock, barrier, inx, i+1, **req[1])
 
+def generate_workload(topology, workload_name, workload_spec):
+    if workload_name not in WORKLOAD:
+        logger.error('No workload implementation named %s was found.'
+                        % workload_name)
+        return None
+    workload_obj = WORKLOAD[workload_name](topology, **workload_spec)
+    return workload_obj
+    
 
-def exec_experiment(topology, workload, orch, workload_name, workload_spec, workload_iterations, requests, netconf, strategy, cache_policy, collectors, nnp, n_rep):
+def exec_experiment(topology, workload, workload_name, workload_spec, workload_iterations, requests, 
+        netconf, strategy, cache_policy, collectors, nnp, n_rep, model_path, model_resume, collectors_result_dict):
     """Execute the simulation of a specific scenario.
 
     Parameters
@@ -71,12 +81,38 @@ def exec_experiment(topology, workload, orch, workload_name, workload_spec, work
     agents = len(model.routers)
     if cpus > agents:
         cpus = agents
-    view = NetworkView(model, cpus, nnp, strategy_name)
+    view = NetworkView(model, cpus, nnp, strategy_name, model_path, model_resume)
     print ("Network View Done")
     controller = NetworkController(model, cpus)
     print ("Network Controller Done")
-    collectors_inst = [DATA_COLLECTOR[name](view, cpus, **params)
-                       for name, params in collectors.items()]
+    view_counts = view.count
+    total_req_iter = workload.n_warmup + workload.n_measured
+    total_req = (workload.n_warmup + workload.n_measured) * workload_iterations
+    resume_valid = 0
+    print ("View Counts ", view.count)
+    print ("Total Requests ", total_req)
+    if collectors_result_dict is not None:
+        if 'CACHE_HIT_RATIO' in collectors_result_dict:
+            cache_hit_ratio = collectors_result_dict['CACHE_HIT_RATIO']
+            print (cache_hit_ratio)
+        if 'PATH_STRETCH' in collectors_result_dict:
+            path_stretch = collectors_result_dict['PATH_STRETCH']
+            print (path_stretch)
+        if 'LATENCY' in collectors_result_dict:
+            latency = collectors_result_dict['LATENCY']
+            print (latency)
+        if 'LINK_LOAD' in collectors_result_dict:
+            link_load = collectors_result_dict['LINK_LOAD']
+            print (link_load)
+        collectors_inst = [DATA_COLLECTOR[name](view, cpus, collectors_result_dict[name], int(view_counts/total_req), model.routers, model.edges, **params)
+                        for name, params in collectors.items()]
+        if int(view_counts/total_req) > 0:
+            # Check this condition for for setting up warm up requests
+            resume_valid = 1
+            print ("VALID RESUME")
+    else:     
+        collectors_inst = [DATA_COLLECTOR[name](view, cpus, collectors_result_dict, 0, model.routers, model.edges, **params)
+                        for name, params in collectors.items()]
     collector = CollectorProxy(view, collectors_inst)
     controller.attach_collector(collector)
     print ("Collector done")
@@ -84,6 +120,10 @@ def exec_experiment(topology, workload, orch, workload_name, workload_spec, work
     strategy_inst = STRATEGY[strategy_name](view, controller, **strategy_args)
     print ("Strategy done")
     #for request in requests:
+    workload_spec = workload_spec.dict()
+    workload_spec['n_warmup'] = 0
+    workload_spec['n_measured'] = total_req_iter
+    workload_spec = Tree(**{k: v for k,v in workload_spec.items()})
     #pool = mp.Pool(cpus)
     #manager = mp.Manager()
     #strategy = manager.dict()
@@ -95,9 +135,13 @@ def exec_experiment(topology, workload, orch, workload_name, workload_spec, work
     workload_len = sum(1 for _ in iter(workload))
     requests = list(split_every(int(workload_len/cpus), iter(workload)))
     """
+    print ("WORKLOAD_SPEC", workload_spec, type(workload_spec))
     for it in range(workload_iterations):
-        if it != 0:
-            workload = orch.generate_workload(topology, workload_name, workload_spec)
+        # in case of first request from resumed experiment, we dont want training workloads, all should be evaluated
+        if it != 0 or resume_valid == 1:
+            print ("Generate workload with no training, all test")
+            # From next time we dont want to train the model, diretly use for testing
+            workload = generate_workload(topology, workload_name, workload_spec)
         requests = list(mit.distribute(cpus, iter(workload)))
         list_req = []
         for r in iter(requests):

@@ -19,18 +19,24 @@ PARALLEL_EXECUTION_RUNS = False
 # This option is ignored if PARALLEL_EXECUTION = False
 N_PROCESSES = cpu_count()
 
+# Setting to overrride experiments if already performed and stored in results
+OVERRIDE = True
+
 # Number of times each experiment is replicated
 N_REPLICATIONS = 1
-WORKLOAD_ITERATIONS = 10
+WORKLOAD_ITERATIONS = 3
 
 # Granularity of caching.
 # Currently, only OBJECT is supported
 CACHING_GRANULARITY = 'OBJECT'
+MODEL_PATH = 'models'
+MODEL_RESUME = True
 
 # Format in which results are saved.
 # Result readers and writers are located in module ./icarus/results/readwrite.py
 # Currently only PICKLE is supported
 RESULTS_FORMAT = 'PICKLE'
+# Resume training from already configured file
 RESULTS_RESUME = 1
 # List of metrics to be measured in the experiments
 # The implementation of data collectors are located in ./icarus/execution/collectors.py
@@ -49,6 +55,8 @@ experiment['topology']['name'] = 'PATH'
 experiment['topology']['n'] = 10
 experiment['topology']['delay'] = 40
 """
+
+#"""
 experiment['topology']['name'] = 'TREE'
 experiment['topology']['k'] = 2
 experiment['topology']['h'] = 4
@@ -61,15 +69,15 @@ experiment['topology']['asn'] = 1221
 experiment['workload'] = {
          'name':       'STATIONARY',
          'n_contents': 200,
-         'n_warmup':   1 * 10 ** 5,
-         'n_measured': 2 * 10 ** 5,
+         'n_warmup':   1 * 10 ** 4,
+         'n_measured': 2 * 10 ** 4,
          'alpha':      1.0,
          'rate':       12.0
                        }
 
 # NN Parameters
 experiment['nnp']['window'] = 200
-experiment['nnp']['lr'] = 0.001
+experiment['nnp']['lr'] = 0.0015
 experiment['nnp']['gamma'] = 0.9
 experiment['nnp']['index_threshold_f'] = experiment['topology']['delay']
 experiment['nnp']['policy_type'] = 1
@@ -87,7 +95,7 @@ experiment['content_placement']['name'] = 'UNIFORM'
 experiment['cache_policy']['name'] = 'IN_CACHE_LFU'
 
 # Set caching meta-policy
-experiment['strategy']['name'] = 'RL_DEC_1'
+experiment['strategy']['name'] = 'INDEX_DIST'
 #experiment['strategy']['name'] = 'LCE'
 
 # Description of the experiment

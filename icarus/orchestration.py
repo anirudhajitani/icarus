@@ -409,6 +409,15 @@ def run_scenario(settings, params, curr_exp, n_exp, collector_results_dict, requ
                 nnp['index_threshold_f'] = tree['nnp']['index_threshold_f']
             if 'index_threshold_d' in tree['nnp']:
                 nnp['index_threshold_d'] = tree['nnp']['index_threshold_d']
+            if 'tau' in tree['nnp']:
+                nnp['tau'] = tree['nnp']['tau']
+            if 'use_gae' in tree['nnp']:
+                nnp['use_gae'] = tree['nnp']['use_gae']
+            if 'avg_reward_case' in tree['nnp']:
+                nnp['avg_reward_case'] = tree['nnp']['avg_reward_case']
+            if 'beta' in tree['nnp']:
+                nnp['beta'] = tree['nnp']['beta']
+
         
         print ("NNP DICT", nnp)
         

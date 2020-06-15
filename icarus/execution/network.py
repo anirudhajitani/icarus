@@ -204,7 +204,7 @@ class Agent(object):
     is executing.
     """
 
-    def __init__(self, view, router, ver, policy_type, gamma=0.9, lr=3e-2, window=250, comb=0):
+    def __init__(self, view, router, ver, policy_type, gamma=0.9, lr=3e-2, window=250, comb=0, tau=0.95, beta=0.001, use_gae=True, avg_reward_case=True):
         """Constructor
         
         Parameters
@@ -229,9 +229,14 @@ class Agent(object):
         self.count2 = 1
         self.hidden_state = 256
         self.gamma = gamma
+        self.use_gae = use_gae
+        self.beta = beta
+        self.tau = tau
+        self.avg_reward = 0.0
+        self.avg_reward_case = avg_reward_case
         self.rewards = 0
         self.valid_action = [0, 1]
-        print ("VER, POL, COMB", ver, policy_type, comb) 
+        print ("Ver, avg_reward_case, use_gae", ver, self.avg_reward_case, self.use_gae) 
         #self.indexes = np.zeros((self.view.model.cache_size[self.cache]), dtype=float)
         if self.view.strategy_name in ['INDEX', 'INDEX_DIST']:
             self.indexes = dict()
@@ -318,6 +323,7 @@ class Agent(object):
                 self.load_model()
 
         if self.view.strategy_name in ['RL_DEC_2F', 'RL_DEC_2D']:
+            self.avg_reward2 = 0.0
             try:
                 if self.policy_type == 0:
                     self.policy = Policy(len(self.view.model.library)*2, len(self.valid_action))
@@ -447,7 +453,7 @@ class Agent(object):
         else:
             state = torch.from_numpy(state).float().unsqueeze(0).unsqueeze(0).to(device)
             probs, state_value, (self.a_hx, self.a_cx) = self.policy.forward(state, (self.a_hx, self.a_cx))
-        #print ("PROBS, STATE_VAL", probs.shape, state_value.shape)
+        #print ("PROBS, STATE_VAL", probs, state_value)
         # create categorical distribution over list of probabilities of actions
         m = Categorical(probs)
         #print ("Output of NN ")
@@ -521,27 +527,55 @@ class Agent(object):
             # Rewards are same for multiple actions, hence compute R only once & use it for all actions taken simultaneously
             if self.view.strategy_name in ['RL_DEC_1']:
                 if c % self.cache_size == 0:
-                    R = r + self.gamma * R
+                    if self.avg_reward_case:
+                        R = R + r - self.avg_reward
+                        if c != 0:
+                            # We dont have the next state here again, hence we do this update for c = 0
+                            self.avg_reward = self.beta * (saved_actions[len(self.policy.rewards) - c][1] - saved_actions[len(self.policy.rewards) - c - 1][1])
+                    else:
+                        R = r + self.gamma * R
             else:
-                R = r + self.gamma * R
+                if self.avg_reward_case:
+                    if c != 0:
+                        R = R + r - self.avg_reward2
+                        self.avg_reward = self.beta * (saved_actions[len(self.policy.rewards) - c][1] - saved_actions[len(self.policy.rewards) - c - 1][1])
+                else:
+                    R = r + self.gamma * R
             c += 1
             returns.insert(0, R)
         #print ("Returns ", self.cache, returns)
         returns = torch.tensor(returns, device=device)
+        # Already normalised, don't do anything here
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
         #print ("Returns ", self.cache, returns)
         #print ("RETURNS LEN", self.cache, len(returns))
 
         #print ("Saved Actions", saved_actions)
         #print ("SAVED ACTIONS LEN", len(saved_actions))
-        for (log_prob, value), R in zip(saved_actions, returns):
-            advantage = R - value.item()
-
-            # calculate actor (policy) loss
-            policy_losses.append(-log_prob * advantage)
-
-            # calulate critic (value) loss using L1 smooth loss
-            value_losses.append(F.smooth_l1_loss(value, torch.tensor([R], device=device)))
+        advantage = torch.tensor(np.zeros((1)), device=device)
+        if self.use_gae:
+            for i in reversed(range(len(saved_actions))):
+                # This is the last set of values saved, we dont have i + cache_size for this
+                # We don't have the next state available immidiately, hence we cannot estimate the value function of next state
+                if i >= len(saved_actions) - self.cache_size:
+                    td_error = self.policy.rewards[i] - saved_actions[i][1]
+                    advantage = td_error
+                else:
+                    # Do it only one once
+                    if i % self.cache_size == 0:
+                        td_error = self.policy.rewards[i] + self.gamma * saved_actions[i + self.cache_size][1] - saved_actions[i][1]
+                        advantage = advantage * self.tau * self.gamma + td_error
+                # calculate actor (policy) loss
+                policy_losses.append(-saved_actions[i][0] * advantage)
+                # calulate critic (value) loss using L1 smooth loss
+                value_losses.append(F.smooth_l1_loss(saved_actions[i][0], torch.tensor([returns[i]], device=device)))
+        else:
+            for (log_prob, value), R in zip(saved_actions, returns):
+                advantage = R - value.item()
+                # calculate actor (policy) loss
+                policy_losses.append(-log_prob * advantage)
+                # calulate critic (value) loss using L1 smooth loss
+                value_losses.append(F.smooth_l1_loss(value, torch.tensor([R], device=device)))
         
         #print ("Policy Loss ", policy_losses)
         #print ("Value Loss ", value_losses)
@@ -555,7 +589,7 @@ class Agent(object):
         loss.backward(retain_graph=True)
         #loss.backward()
         #print ("Backprop Loss")
-        #torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
+        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
         #print ("Gradients Clip")
         self.optimizer.step()
         #print ("Optimizer Step")
@@ -583,24 +617,44 @@ class Agent(object):
         returns = [] # list to save true values
         # calculate the true value using rewards returned from the environment
         # this reward is appended by the environment 
+        c = 0
         for r in self.policy2.rewards[::-1]:
             # calculate the discounted value
             #print ("Reward : ", r)
-            R = r + self.gamma * R
+            if self.avg_reward_case:
+                if c != 0:
+                    self.avg_reward2 = self.beta * (saved_actions[len(self.policy2.rewards) - c][1] - saved_actions[len(self.policy2.rewards) - c - 1][1])
+                else:
+                    R = r + self.gamma * R
+            c += 1
             returns.insert(0, R)
         returns = torch.tensor(returns, device=device)
         returns = (returns - returns.mean()) / (returns.std() + self.eps2)
         #print ("Returns ", returns)
 
         #print ("Saved Actions", saved_actions)
-        for (log_prob, value), R in zip(saved_actions, returns):
-            advantage = R - value.item()
-
-            # calculate actor (policy) loss
-            policy_losses.append(-log_prob * advantage)
-
-            # calulate critic (value) loss using L1 smooth loss
-            value_losses.append(F.smooth_l1_loss(value, torch.tensor([R], device=device)))
+        advantage = torch.tensor(np.zeros((1)), device=device)
+        if self.use_gae:
+            for i in reversed(range(len(saved_actions))):
+                # This is the last set of values saved, we dont have i + cache_size for this
+                # We don't have the next state available immidiately, hence we cannot estimate the value function of next state
+                if i == len(saved_actions) - 1:
+                    td_error = self.policy2.rewards[i] - saved_actions[i][1]
+                    advantage = td_error
+                else:
+                    td_error = self.policy2.rewards[i] + self.gamma * saved_actions[i + self.cache_size][1] - saved_actions[i][1]
+                    advantage = advantage * self.tau * self.gamma + td_error
+                # calculate actor (policy) loss
+                policy_losses.append(-saved_actions[i][0] * advantage)
+                # calulate critic (value) loss using L1 smooth loss
+                value_losses.append(F.smooth_l1_loss(saved_actions[i][0], torch.tensor([returns[i]], device=device)))
+        else:
+            for (log_prob, value), R in zip(saved_actions, returns):
+                advantage = R - value.item()
+                # calculate actor (policy) loss
+                policy_losses.append(-log_prob * advantage)
+                # calulate critic (value) loss using L1 smooth loss
+                value_losses.append(F.smooth_l1_loss(value, torch.tensor([R], device=device)))
         
         #print ("Policy Loss ", policy_losses)
         #print ("Value Loss ", value_losses)
@@ -671,6 +725,14 @@ class NetworkView(object):
             nnp['policy_type'] = 0
         if 'comb' not in nnp:
             nnp['comb'] = 0
+        if 'tau' not in nnp:
+            nnp['tau'] = 0.95
+        if 'beta' not in nnp:
+            nnp['beta'] = 0.001
+        if 'use_gae' not in nnp:
+            nnp['use_gae'] = True
+        if 'avg_reward_case' not in nnp:
+            nnp['avg_reward_case'] = True
         #self.status = [False] * cpus
         #self.ind_count = [0] * cpus
         self.update_freq = nnp['update_freq']
@@ -680,7 +742,8 @@ class NetworkView(object):
         self.comb = nnp['comb']
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
-            self.agents.append(Agent(self, r, self.state_ver, self.policy_type, nnp['gamma'], nnp['lr'], nnp['window'], nnp['comb']))
+            self.agents.append(Agent(self, r, self.state_ver, self.policy_type, nnp['gamma'], nnp['lr'], nnp['window'], nnp['comb'],
+                                nnp['tau'], nnp['beta'], nnp['use_gae'], nnp['avg_reward_case']))
         if strategy_name in ['RL_DEC_1']:
             self.agents_per_thread = int(len(self.agents)/cpus)
             self.extra_agents = len(self.agents) % cpus

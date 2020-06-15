@@ -13,7 +13,7 @@ LOG_LEVEL = 'INFO'
 # If True, executes simulations in parallel using multiple processes
 # to take advantage of multicore CPUs
 PARALLEL_EXECUTION = False
-PARALLEL_EXECUTION_RUNS = False
+PARALLEL_EXECUTION_RUNS = True
 
 # Number of processes used to run simulations in parallel.
 # This option is ignored if PARALLEL_EXECUTION = False
@@ -24,7 +24,7 @@ OVERRIDE = True
 
 # Number of times each experiment is replicated
 N_REPLICATIONS = 1
-WORKLOAD_ITERATIONS = 3
+WORKLOAD_ITERATIONS = 100
 
 # Granularity of caching.
 # Currently, only OBJECT is supported
@@ -69,8 +69,8 @@ experiment['topology']['asn'] = 1221
 experiment['workload'] = {
          'name':       'STATIONARY',
          'n_contents': 200,
-         'n_warmup':   1 * 10 ** 4,
-         'n_measured': 2 * 10 ** 4,
+         'n_warmup':   1 * 10 ** 5,
+         'n_measured': 2 * 10 ** 5,
          'alpha':      1.0,
          'rate':       12.0
                        }
@@ -82,7 +82,12 @@ experiment['nnp']['gamma'] = 0.9
 experiment['nnp']['index_threshold_f'] = experiment['topology']['delay']
 experiment['nnp']['policy_type'] = 1
 experiment['nnp']['state_ver'] = 0
-#experiment['nnp']['index_threshold_d'] = (experiment['topology']['delay'] / experiment['workload']['n_contents']) * 2
+experiment['nnp']['index_threshold_d'] = (experiment['topology']['delay'] / experiment['workload']['n_contents']) * 2
+experiment['nnp']['tau'] = 0.95
+experiment['nnp']['update_freq'] = 100
+experiment['nnp']['beta'] = 0.001
+experiment['nnp']['use_gae'] = True
+experiment['nnp']['avg_reward_case'] = True
 
 # Set cache placement
 experiment['cache_placement']['name'] = 'UNIFORM'
@@ -95,7 +100,7 @@ experiment['content_placement']['name'] = 'UNIFORM'
 experiment['cache_policy']['name'] = 'IN_CACHE_LFU'
 
 # Set caching meta-policy
-experiment['strategy']['name'] = 'INDEX_DIST'
+experiment['strategy']['name'] = 'RL_DEC_1'
 #experiment['strategy']['name'] = 'LCE'
 
 # Description of the experiment

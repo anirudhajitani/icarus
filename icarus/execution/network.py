@@ -102,6 +102,93 @@ def symmetrify_paths_len(shortest_paths_len):
     return shortest_paths_len
 
 
+class GraphAttentionLayer(nn.Module):
+    """
+    Simple GAT layer, similar to https://arxiv.org/abs/1710.10903
+    """
+
+    def __init__(self, in_features, out_features, alpha, concat=True):
+        super(GraphAttentionLayer, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.alpha = alpha
+        self.concat = concat
+
+        self.W = nn.Parameter(torch.zeros(size=(in_features, out_features)))
+        nn.init.xavier_uniform_(self.W.data, gain=1.414)
+        self.a = nn.Parameter(torch.zeros(size=(2*out_features, 1)))
+        nn.init.xavier_uniform_(self.a.data, gain=1.414)
+
+        self.leakyrelu = nn.LeakyReLU(self.alpha)
+
+    def forward(self, inp):
+        h = torch.mm(inp, self.W)
+        N = h.size()[0]
+        print ("N = ", N)
+        a_input = torch.cat([h.repeat(1, N).view(N * N, -1), h.repeat(N, 1)], dim=1).view(N, -1, 2 * self.out_features)
+        print ("A_input shape = ", a_input.shape)
+        #print ("A_input = ", a_input)
+        e = self.leakyrelu(torch.matmul(a_input, self.a).squeeze(2))
+        print ("e = ", e.shape)
+        zero_vec = -9e15*torch.ones_like(e)
+        one_vec = torch.ones_like(e)
+        attention = torch.where(one_vec > 0, e, zero_vec)
+        print ("Attention before softmax shape = ", attention.shape)
+        #print ("Attention before softmax = ", attention)
+        attention = F.softmax(attention, dim=1)
+        print ("Attention after softmax shape = ", attention.shape)
+        h_prime = torch.matmul(attention, h)
+        print ("h_prime shape = ", h_prime.shape)
+        #print ("h_prime = ", h_prime)
+        if self.concat:
+            return F.elu(h_prime)
+        else:
+            return h_prime
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'
+
+
+class GATPolicy(nn.Module):
+    def __init__(self, nfeat, nhid, a_len, alpha, nheads):
+        """Dense version of GAT."""
+        super(GATPolicy, self).__init__()
+        self.attentions = [GraphAttentionLayer(nfeat, nhid, alpha=alpha, concat=True) for _ in range(nheads)]
+        print ("Model attention shape : ", self.attentions)
+        for i, attention in enumerate(self.attentions):
+            self.add_module('attention_{}'.format(i), attention)
+        
+        self.affine1 = nn.Linear(nhid * nheads, 256)
+        #Don't want to use Dropout with RL (not very stable)
+        #self.dropout = nn.Dropout(p=0.6)
+        self.affine2 = nn.Linear(256, 128)
+        # actor's layer
+        self.action_head = nn.Linear(128, a_len)
+
+        # critic's layer
+        self.value_head = nn.Linear(128, 1)
+
+        # action and reward buffer
+        self.saved_actions = []
+        self.rewards = []
+        self.to(device)
+
+    
+    def forward(self, x):
+        x = torch.cat([att(x) for att in self.attentions], dim=1)
+        #print ("POLICY FORWARD")
+        x = F.relu(self.affine1(x[:1, :]))
+        #x = self.dropout(x)
+        x = F.relu(self.affine2(x))
+        # actor: choses action to taken based on state s_t
+        # by returning probability of each action
+        action_prob = F.softmax(self.action_head(x), dim=-1)
+        # critic evaluates being in state s_t
+        state_values = self.value_head(x)
+        # return value of both actor and critic as a 2 tuple
+        # 1. a list of probability of each action over state space
+        # 2. the value from state s_t
+        return action_prob, state_values
 
 class Policy(nn.Module):
     """
@@ -302,13 +389,15 @@ class Agent(object):
                 if self.state_ver == 1:
                     if self.policy_type == 0:
                         self.policy = Policy(len(self.view.model.library), len(self.valid_action))
-                    else:
+                    elif self.policy_type == 1:
                         self.policy = RNNPolicy(len(self.view.model.library), self.hidden_state, len(self.valid_action))
                 else:
                     if self.policy_type == 0:
                         self.policy = Policy(len(self.view.model.library), len(self.view.model.library))
-                    else:
+                    elif self.policy_type == 1:
                         self.policy = RNNPolicy(len(self.view.model.library), self.hidden_state, len(self.view.model.library))
+                    elif self.policy_type == 2:
+                        self.policy = GATPolicy(len(self.view.model.library), self.hidden_state, len(self.view.model.library), 0.2, 4)
 
                 #print ("POLICY", self.policy)
                 self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
@@ -450,6 +539,10 @@ class Agent(object):
         if self.policy_type == 0:
             state = torch.from_numpy(state).float().to(device)
             probs, state_value = self.policy.forward(state)
+        elif self.policy_type == 2:
+            state = torch.stack([x for x in state]).to(device)
+            print ("State = ", state, state.shape)
+            probs, state_value = self.policy.forward(state)
         else:
             state = torch.from_numpy(state).float().unsqueeze(0).unsqueeze(0).to(device)
             probs, state_value, (self.a_hx, self.a_cx) = self.policy.forward(state, (self.a_hx, self.a_cx))
@@ -460,7 +553,7 @@ class Agent(object):
         #print (m)
         # sample an action from the categorical distribution
         # Select top k values from probability softmax output
-        if self.state_ver == 0 and self.view.strategy_name in ['RL_DEC_1']:
+        if self.state_ver == 0 or self.state_ver == 2 and self.view.strategy_name in ['RL_DEC_1']:
             top_k_val, top_k_inx = probs.topk(self.cache_size)
             for action in top_k_inx:
                 self.policy.saved_actions.append(SavedAction(m.log_prob(action), state_value))
@@ -1095,6 +1188,8 @@ class NetworkModel(object):
         self.source_node = {}
         #List of all routers in the topology
         self.routers = []
+        self.neighbor_distance = 2
+        self.neighbor = dict()
         self.edges = nx.edges(topology)
         print ("EDGES", self.edges)
         #List of all files in the library
@@ -1121,6 +1216,7 @@ class NetworkModel(object):
             #print (node, list(topology.neighbors(node)))
             if stack_name == 'router':
                 if 'cache_size' in stack_props:
+                    #print (nx.ego_graph(topology, node, radius=3))
                     self.cache_size[node] = stack_props['cache_size']
                     self.routers.append(node)
                     self.color_dict[node] = 'r'
@@ -1140,6 +1236,11 @@ class NetworkModel(object):
                 if self.cache_size[node] < 1:
                     self.cache_size[node] = 1
         print ("ROUTERS", self.routers)
+        for r in self.routers:
+            path_lengths = nx.single_source_dijkstra_path_length(topology, r)
+            self.neighbor[r] = [v for v, length in path_lengths.items() \
+                if length <= self.neighbor_distance and v in self.routers and v !=r]
+            print ("Neighbor for node ", r, " is ", self.neighbor[r])
         policy_name = cache_policy['name']
         policy_args = {k: v for k, v in cache_policy.items() if k != 'name'}
         # The actual cache objects storing the content

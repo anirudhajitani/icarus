@@ -6,6 +6,7 @@ import networkx as nx
 import sys
 import time
 import numpy as np
+import torch
 from icarus.registry import register_strategy
 from icarus.util import inheritdoc, path_links
 from .base import Strategy
@@ -407,6 +408,12 @@ class RlDec1(Strategy):
         start, end = self.get_agent_indexes(inx)
         for i in range(start,end):
             curr_state = self.view.agents[i].get_state()
+            if self.view.agents[i].policy_type == 2:
+                curr_state = [torch.from_numpy(curr_state).float()]
+                for nei in self.view.model.neighbor[self.view.model.routers[i]]:
+                    print ("Neighbor ", nei, " node ", i)
+                    nei_state = self.view.agents[self.view.model.routers.index(nei)].get_state()
+                    curr_state.append(torch.from_numpy(nei_state).float())
             #print ("STATE for ", i, " = ", curr_state)
             action = self.view.agents[i].select_actions(curr_state)
             action = self.view.agents[i].decode_action(action)

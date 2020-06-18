@@ -408,15 +408,17 @@ class RlDec1(Strategy):
         start, end = self.get_agent_indexes(inx)
         for i in range(start,end):
             curr_state = self.view.agents[i].get_state()
-            if self.view.agents[i].policy_type == 2:
+            if self.view.agents[i].policy_type in [2, 4, 6, 7]:
                 curr_state = [torch.from_numpy(curr_state).float()]
                 for nei in self.view.model.neighbor[self.view.model.routers[i]]:
                     print ("Neighbor ", nei, " node ", i)
                     nei_state = self.view.agents[self.view.model.routers.index(nei)].get_state()
                     curr_state.append(torch.from_numpy(nei_state).float())
             #print ("STATE for ", i, " = ", curr_state)
+            # No need to decode action in RL_DEC_1, it sends decoded actions by default
             action = self.view.agents[i].select_actions(curr_state)
-            action = self.view.agents[i].decode_action(action)
+            #action = self.view.agents[i].decode_action(action)
+            self.view.agents[i].action = action
             #self.view.agents[i].rewards -= self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
             delay_fetch = self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
             if log == True:

@@ -406,6 +406,7 @@ class RlDec1(Strategy):
         """
         #print ("ENV STEP")
         start, end = self.get_agent_indexes(inx)
+        lock.acquire()
         for i in range(start,end):
             curr_state = self.view.agents[i].get_state()
             if self.view.agents[i].policy_type in [2, 3, 4, 6, 7]:
@@ -420,11 +421,42 @@ class RlDec1(Strategy):
             #action = self.view.agents[i].decode_action(action)
             #self.view.agents[i].action = action
             #self.view.agents[i].rewards -= self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
-            delay_fetch = self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
-            if log == True:
-                self.view.fetch_delay += (delay_fetch * 2)
-            self.view.agents[i].rewards -= delay_fetch 
+            rew = self.perform_action(action, self.view.agents[i].cache, size, inx, lock)
+            if self.view.reward_type == 1:
+                self.view.agents[i].rewards += rew
+            else:
+                if log == True:
+                    self.view.fetch_delay += (rew * 2)
+                self.view.agents[i].rewards -= rew
+        lock.release()
 
+    def env_step_cen(self, size, inx, lock, log):
+        """
+
+        A step of the environment includes the following for all agents:
+        1. get the current state of each agent
+        2. select actions
+        3. perform the actions
+        """
+        #print ("ENV STEP")
+        curr_state = []
+        ps = []
+        for i in range(len(self.view.agents)):
+            curr_state.append(torch.from_numpy(self.view.agents[i].get_state()).float())
+            ps.append(self.view.agents[i].ps)
+        actions = self.view.select_actions(curr_state, ps)
+        print ("ENv Step : ", actions)
+        lock.acquire()
+        for i in range(len(self.view.agents)):
+            rew = self.perform_action(actions[i], self.view.agents[i].cache, size, inx, lock)
+            if self.view.reward_type == 1:
+                self.view.agents[i].rewards += rew
+            else:
+                self.view.agents[i].rewards -= rew
+                if log == True:
+                    self.view.fetch_delay += (rew * 2)
+        lock.release()
+    
     def update_gradients(self, inx):
         """
 
@@ -437,6 +469,15 @@ class RlDec1(Strategy):
         for i in range(start, end):
             self.view.agents[i].update()
 
+    def update_gradients_cen(self, inx):
+        """
+
+        Get the rewards from the environment
+        Append the rewards to the rewards data structure accessed by the policy class
+        Perform actor-critic update
+        """
+        self.view.update()
+    
     def save_model(self, inx, count):
         start, end = self.get_agent_indexes(inx)
         #print ("UPGARDE GRADIENTS")
@@ -457,24 +498,29 @@ class RlDec1(Strategy):
         add_contents = []
         remove_contents = []
         existing_contents = self.view.cache_dump(cache)
+        rew = 0
         #print ("EXISTING CONTENTS", cache, existing_contents)
         #print ("Action", action)
-        for a in range(action.size):
+        if self.view.centralized == True:
+            action_size = action.squeeze().shape[0]
+        else:
+            action_size = action.size
+        for a in range(action_size):
             if action[a] == 1:
                 #here get_content called without content so cache hit/miss can be computed,
                 if self.controller.get_content(cache, inx, a+1) is False:
                     add_contents.append(a+1)
+                else:
+                    if self.view.reward_type == 1:
+                        rew += 1
             else:
                 if a+1 in existing_contents:
                     remove_contents.append(a+1)
-
         #print ("To be added ", cache, add_contents)
         #print ("To be removed ", cache, remove_contents)
     
-        lock.acquire()
         for rc in remove_contents:
             self.controller.remove_content(cache, inx, rc)
-        rew = 0
         for ac in add_contents:
             # Get location of all nodes that has the content stored
             content_loc = self.view.content_locations(ac)
@@ -493,13 +539,13 @@ class RlDec1(Strategy):
             min_path = self.view.shortest_path(cache, serving_node)
             for u, v in path_links(min_path):
                 self.controller.forward_request_hop(u, v, inx)
-            rew += min_delay
+            if self.view.reward_type == 0:
+                rew += min_delay
             # update the rewards for the episode
             #print ("DELAY IN FETCHING", min_delay)
             path = list(reversed(self.view.shortest_path(cache, serving_node)))
             self.controller.forward_content_path(serving_node, cache, size, inx, path)
             self.controller.put_content(cache, inx, ac)
-        lock.release()
         #print ("CACHE DUMP ", cache, " = ", self.view.cache_dump(cache))
         return rew
 
@@ -522,7 +568,10 @@ class RlDec1(Strategy):
         #print ("View Count , Count, Thread Inx : ", self.view.count, count, inx)
         #if self.view.count % 50 == 0:
         if count % self.view.update_freq == 0:
-            self.env_step(size, inx, lock, log) 
+            if self.view.centralized == True:
+                self.env_step_cen(size, inx, lock, log)
+            else:
+                self.env_step(size, inx, lock, log) 
         # Get location of all nodes that has the content stored
         content_loc = self.view.content_locations(content)
         #print ("Content Loc: ", content_loc, content)
@@ -559,6 +608,8 @@ class RlDec1(Strategy):
             self.view.tot_delay += (min_delay * 2)
         #print ("DELAY ", serving_node, " , ", min_delay, " DEL ", self.view.tot_delay, " FETCH DELAY ", self.view.fetch_delay, "TOT_DELAY", self.view.tot_delay + self.view.fetch_delay)
         self.view.common_rewards -= min_delay
+        if serving_node in self.view.model.routers and self.view.reward_type == 1:
+            self.view.agents[self.view.model.routers.index(serving_node)].rewards += 1
         #print ("COMMON REW", min_delay, self.view.common_rewards)
         lock.release()
         
@@ -567,14 +618,24 @@ class RlDec1(Strategy):
             start, end = self.get_agent_indexes(inx)
             for i in range(start,end):
                 # Normalize the common rewards by number of agents
-                self.view.agents[i].rewards += (self.view.common_rewards/len(self.view.agents))
+                if self.view.reward_type == 0:
+                    self.view.agents[i].rewards += (self.view.common_rewards/len(self.view.agents))
+                if self.view.spatio_rewards == True:
+                    for j in range(len(self.view.model.routers)):
+                        # Spatio-temporal rewards
+                        if self.view.model.neighbor_mask[i, j] == 1 and i != j and self.view.reward_type == 1:
+                            # for delay how to make rewards separate
+                            self.view.agents[i].rewards += self.view.agents[j].rewards * self.view.alpha ** self.view.model.distance_mask[i, j]
                 #self.view.agents[i].rewards += self.view.common_rewards
                 if self.view.agents[i].state_ver == 1:
                     self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
                 else:
                     for x in range(self.view.agents[i].cache_size):
                         #print ("APPEND REWARDS ", self.view.agents[i].rewards, " I= ", i)
-                        self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
+                        if self.view.centralized == True:
+                            self.view.policy.rewards.append(self.view.agents[i].rewards)
+                        else:
+                            self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
                 self.view.agents[i].rewards *= 0
                 #print ("TYPE 2" , type(self.view.agents[agent_inx].state_counts))
             barrier.wait()
@@ -583,7 +644,10 @@ class RlDec1(Strategy):
 
         if count % (self.view.update_freq * 50) == 0:
             #self.view.agents[i].state_counts *= 0
-            self.update_gradients(inx)
+            if self.view.centralized == True:
+                self.update_gradients_cen(inx)
+            else:
+                self.update_gradients(inx)
         if count % (self.view.update_freq * 100) == 0:
             #Use barrier here so that the epochs are consistent
             barrier.wait()

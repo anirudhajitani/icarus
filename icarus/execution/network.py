@@ -521,45 +521,6 @@ class GATPolicy(BasePolicy):
         self.loss = self.policy_loss + self.value_loss + self.entropy_loss
         self.loss.backward()
 
-class GATPolicyCentralized(BasePolicy):
-    def __init__(self, n_s, n_a, n_hid, alpha=0.2, dropout=0.6, n_heads=4, n_fc=64, n_h=64, name=None, na_dim_ls=None):
-        super(GATPolicyCentralized, self).__init__(n_s, n_a, 'gat_cen', 0, n_fc, n_h)
-        self.centralized = 1
-        self.attentions = [GraphAttentionLayer(n_s, n_hid, self.centralized, alpha, dropout, concat=True) for _ in range(n_heads)]
-        print ("Model attention shape : ", self.attentions)
-        for i, attention in enumerate(self.attentions):
-            self.add_module('attention_{}'.format(i), attention)
-        self._init_net()
-        self.fc_layer = nn.Linear(self.n_heads * n_hid, self.n_fc)
-        self.to(device)
-
-    def forward(self, ob, done, out_type='p', adj=None, action=None):
-        #ob = torch.from_numpy(ob).float()
-        ob = F.dropout(ob, self.dropout, training=self.training)
-        ob = torch.cat([att(ob, adj) for att in self.attentions], dim=1)
-        ob = F.dropout(ob, self.dropout, training=self.training)
-        xs = self._encode_ob(ob)
-        if out_type == 'p':
-            return F.softmax(self.actor_head(xs), dim=1)
-        else:
-            return self._run_critic_head(xs)
-
-    def backward(self, obs, nactions, acts, dones, Rs, Advs, e_coef, v_coef, adj=None):
-        #obs = torch.from_numpy(obs).float()
-        dones = torch.from_numpy(dones).float()
-        obs = F.dropout(obs, self.dropout, training=self.training)
-        obs = torch.cat([att(obs, adj) for att in self.attentions], dim=1)
-        obs = F.dropout(obs, self.dropout, training=self.training)
-        xs = self._encode_ob(obs)
-        actor_dist = torch.distributions.categorical.Categorical(logits=F.log_softmax(self.actor_head(xs), dim=1))
-        vs = self._run_critic_head(xs)
-        self.policy_loss, self.value_loss, self.entropy_loss = \
-            self._run_loss(actor_dist, e_coef, v_coef, vs,
-                           torch.from_numpy(acts).long(),
-                           torch.from_numpy(Rs).float(),
-                           torch.from_numpy(Advs).float())
-        self.loss = self.policy_loss + self.value_loss + self.entropy_loss
-        self.loss.backward()
 
 class BaseLstmPolicy(BasePolicy):
     def __init__(self, n_s, n_a, n_n, n_fc=64, n_lstm=64, n_h=64, name='lstm', na_dim_ls=None):
@@ -950,13 +911,189 @@ class DIALMultiAgentPolicy(NCMultiAgentPolicy):
                F.relu(self.fc_m_layer(h)) + a_i
 
 
-class NCMultiAgentPolicyCentralized(BasePolicy):
+class BasePolicyCentralized(nn.Module):
+    def __init__(self, n_s, n_a, n_agent, policy_name, n_fc=64, n_lstm=64, n_h=64, neighbor_mask=None):
+        super(BasePolicyCentralized, self).__init__()
+        print ("Base n_s, n_a, Nagent, name, n_n, n_fc, n_lstm, n_h, N_mask ", n_s, n_a, n_agent, policy_name, n_fc, n_lstm, n_h, neighbor_mask)
+        self.name = policy_name
+        self.n_a = n_a
+        self.n_s = n_s
+        self.n_fc = n_fc
+        self.n_h = n_h
+        self.n_agent = n_agent
+        self.n_lstm = n_lstm
+        self.neighbor_mask = neighbor_mask
+        self._init_net()
+        self.saved_actions = []
+        self.rewards = []
+        self.to(device)
+
+    def forward(self, ob, done, action=None, out_type='p'):
+        #ob = torch.from_numpy(np.expand_dims(ob, axis=0)).float()
+        xs = self._encode_ob(ob)
+        if out_type.startswith('p'):
+            #print ("O/p of softmax", F.softmax(self.actor_head(xs)).squeeze().detach().cpu().numpy())
+            return F.softmax(self.actor_head(xs), dim=1).squeeze()
+        else:
+            #print ("o/p is value fun")
+            return self._run_critic_head(xs)
+
+    def backward(self, ob, acts, dones, Rs, Advs, e_coef, v_coef):
+        #ob = torch.from_numpy(ob).float()
+        dones = torch.from_numpy(dones).float()
+        xs = self._encode_ob(ob)
+        actor_dist = torch.distributions.categorical.Categorical(logits=F.log_softmax(self.actor_head(xs), dim=1))
+        vs = self._run_critic_head(xs)
+        self.policy_loss, self.value_loss, self.entropy_loss = \
+            self._run_loss(actor_dist, e_coef, v_coef, vs,
+                           torch.from_numpy(acts).long(),
+                           torch.from_numpy(Rs).float(),
+                           torch.from_numpy(Advs).float())
+        self.loss = self.policy_loss + self.value_loss + self.entropy_loss
+        self.loss.backward()
+
+    def _encode_ob(self, ob):
+        return F.relu(self.fc_layer(ob))
+
+    def _init_net(self):
+        self.fc_layer = nn.Linear(self.n_s, self.n_fc)
+        self._init_actor_head(self.n_fc)
+        self._init_critic_head(self.n_fc)
+
+    def _init_actor_head(self, n_h, n_a=None):
+        if n_a is None:
+            n_a = self.n_a
+        # only discrete control is supported for now
+        self.actor_head = nn.Linear(n_h, n_a)
+        init_layer(self.actor_head, 'fc') 
+
+    def _init_critic_head(self, n_h, n_n=None):
+        self.critic_head = nn.Linear(n_h, 1)
+        init_layer(self.critic_head, 'fc') 
+
+    def _run_critic_head(self, h, n_n=None):
+        print ("Run Critic Head")
+        return self.critic_head(h)
+
+    def _run_loss(self, actor_dist, e_coef, v_coef, vs, As, Rs, Advs):
+        log_probs = actor_dist.log_prob(As)
+        policy_loss = -(log_probs * Advs).mean()
+        entropy_loss = -(actor_dist.entropy()).mean() * e_coef
+        value_loss = (Rs - vs).pow(2).mean() * v_coef
+        return policy_loss, value_loss, entropy_loss
+
+class GATPolicyCentralized(BasePolicyCentralized):
+    def __init__(self, n_s, n_a, n_hid, n_agent, alpha=0.2, dropout=0.6, n_heads=4, n_fc=64, n_h=64, name=None, na_dim_ls=None, neighbor_mask=None):
+        super(GATPolicyCentralized, self).__init__(n_s, n_a, n_agent, 'gat_cen', n_fc, n_h, neighbor_mask)
+        self.centralized = 1
+        self.n_heads = n_heads
+        self.dropout = dropout
+        self.attentions = [GraphAttentionLayer(n_s, n_hid, self.centralized, alpha, dropout, concat=True) for _ in range(n_heads)]
+        print ("Model attention shape : ", self.attentions)
+        for i, attention in enumerate(self.attentions):
+            self.add_module('attention_{}'.format(i), attention)
+        self._init_net()
+        self.fc_layer = nn.Linear(self.n_heads * n_hid, self.n_fc)
+        self.to(device)
+
+    def forward(self, ob, done, adj, action=None, out_type='p'):
+        #ob = torch.from_numpy(ob).float()
+        adj = torch.from_numpy(adj).float().to(device)
+        ob = F.dropout(ob, self.dropout, training=self.training)
+        ob = torch.cat([att(ob, adj) for att in self.attentions], dim=1)
+        ob = F.dropout(ob, self.dropout, training=self.training)
+        xs = self._encode_ob(ob)
+        if out_type == 'p':
+            return F.softmax(self.actor_head(xs), dim=1)
+        else:
+            return self._run_critic_head(xs)
+
+    def backward(self, obs, nactions, acts, dones, Rs, Advs, e_coef, v_coef, adj=None):
+        #obs = torch.from_numpy(obs).float()
+        dones = torch.from_numpy(dones).float()
+        obs = F.dropout(obs, self.dropout, training=self.training)
+        obs = torch.cat([att(obs, adj) for att in self.attentions], dim=1)
+        obs = F.dropout(obs, self.dropout, training=self.training)
+        xs = self._encode_ob(obs)
+        actor_dist = torch.distributions.categorical.Categorical(logits=F.log_softmax(self.actor_head(xs), dim=1))
+        vs = self._run_critic_head(xs)
+        self.policy_loss, self.value_loss, self.entropy_loss = \
+            self._run_loss(actor_dist, e_coef, v_coef, vs,
+                           torch.from_numpy(acts).long(),
+                           torch.from_numpy(Rs).float(),
+                           torch.from_numpy(Advs).float())
+        self.loss = self.policy_loss + self.value_loss + self.entropy_loss
+        self.loss.backward()
+
+class BaseLstmPolicyCentralized(BasePolicyCentralized):
+    def __init__(self, n_s, n_a, n_agent, n_fc=64, n_lstm=64, n_h=64, name='lstm', na_dim_ls=None, neighbor_mask=None):
+        super(BaseLstmPolicyCentralized, self).__init__(n_s, n_a, n_agent, name, n_fc, n_lstm, n_h, neighbor_mask)
+        print ("LSTM n_s, n_a, n_n, n_fc, n_lstm, name ", n_s, n_a, n_fc, n_lstm, name)
+        self.n_lstm = n_lstm
+        self.n_fc = n_fc
+        self._init_net()
+        self._reset()
+        self.to(device)
+
+    def backward(self, obs, nactions, acts, dones, Rs, Advs,
+                    e_coef, v_coef):
+        #obs = torch.from_numpy(obs).float()
+        dones = torch.from_numpy(dones).float().to(device)
+        xs = self._encode_ob(obs)
+        hs, new_states = run_rnn_cen(self.lstm_layer, xs, dones, self.states_bw)
+        # backward grad is limited to the minibatch
+        self.states_bw = new_states.detach()
+        actor_dist = torch.distributions.categorical.Categorical(logits=F.log_softmax(self.actor_head(hs), dim=1))
+        vs = self._run_critic_head(hs)
+        self.policy_loss, self.value_loss, self.entropy_loss = \
+            self._run_loss(actor_dist, e_coef, v_coef, vs,
+                           torch.from_numpy(acts).long(), 
+                           torch.from_numpy(Rs).float(), 
+                           torch.from_numpy(Advs).float())
+        self.loss = self.policy_loss + self.value_loss + self.entropy_loss
+        self.loss.backward()
+    
+    #TODO - find out shape of done and append with all 0s while calling forward and backward
+    def forward(self, ob, done, naction=None, out_type='p'):
+        #ob = torch.from_numpy(np.expand_dims(ob, axis=0)).float()
+        print ("Out_type=", out_type)
+        done = torch.from_numpy(np.expand_dims(done, axis=0)).float().to(device)
+        x = self._encode_ob(ob)
+        h, new_states = run_rnn_cen(self.lstm_layer, x, done, self.states_fw)
+        print ("Shape after run_rnn", h.shape, new_states.shape)
+        if out_type.startswith('p'):
+            print ("Actor")
+            self.states_fw = new_states.detach()
+            return F.softmax(self.actor_head(h), dim=1).squeeze()
+        else:
+            print ("Critic ", self._run_critic_head(h))
+            return self._run_critic_head(h)
+
+    def _encode_ob(self, ob):
+        return F.relu(self.fc_layer(ob))
+
+    def _init_net(self):
+        print ("LSTM init")
+        print (self.n_s, self.n_fc, type(self.n_s), type(self.n_fc))
+        self.fc_layer = nn.Linear(self.n_s, self.n_fc)
+        init_layer(self.fc_layer, 'fc')
+        self.lstm_layer = nn.LSTMCell(self.n_fc, self.n_lstm)
+        init_layer(self.lstm_layer, 'lstm')
+        self._init_actor_head(self.n_lstm)
+        self._init_critic_head(self.n_lstm)
+
+    def _reset(self):
+        # forget the cumulative states every cum_step
+        self.states_fw = torch.zeros(self.n_agent, self.n_lstm * 2).to(device)
+        self.states_bw = torch.zeros(self.n_agent, self.n_lstm * 2).to(device)
+
+class NCMultiAgentPolicyCentralized(BasePolicyCentralized):
     """ Inplemented as a centralized meta-DNN. To simplify the implementation, all input
     and output dimensions are identical among all agents, and invalid values are casted as
     zeros during runtime."""
-    def __init__(self, n_s, n_a, n_agent, neighbor_mask, n_fc=64, n_h=64,
+    def __init__(self, n_s, n_a, n_agent, neighbor_mask, n_fc=64, n_h=64, n_lstm=64, name='nc_cen',
                  n_s_ls=None, n_a_ls=None):
-        super(NCMultiAgentPolicyCentralized, self).__init__(n_a, n_s, 'nc_cen')
+        super(NCMultiAgentPolicyCentralized, self).__init__(n_s, n_a, n_agent, name, n_fc, n_lstm, n_h, neighbor_mask)
         self.n_agent = n_agent
         self.neighbor_mask = neighbor_mask
         self.n_fc = n_fc
@@ -993,25 +1130,32 @@ class NCMultiAgentPolicyCentralized(BasePolicy):
         
     def forward(self, ob, done, fp, action=None, out_type='p'):
         # TxNxm
-        ob = torch.from_numpy(np.expand_dims(ob, axis=0)).float()
-        done = torch.from_numpy(np.expand_dims(done, axis=0)).float()
-        fp = torch.from_numpy(np.expand_dims(fp, axis=0)).float()
+        #ob = torch.from_numpy(np.expand_dims(ob, axis=0)).float()
+        ob = ob.unsqueeze(0)
+        fp = fp.unsqueeze(0)
+        done = torch.from_numpy(np.expand_dims(done, axis=0)).float().to(device)
+        #fp = torch.from_numpy(np.expand_dims(fp, axis=0)).float().to(device)
         # h dim: NxTxm
+        print ("forward shapes ob, fp, states_fw", ob.shape, fp.shape, self.states_fw.shape)
         h, new_states = self._run_comm_layers(ob, done, fp, self.states_fw)
+        print ("After run_comm_layers h, new_states ", h.shape, new_states.shape)
         if out_type.startswith('p'):
             self.states_fw = new_states.detach()
-            return self._run_actor_heads(h, detach=True)
+            return self._run_actor_heads(h)
         else:
-            action = torch.from_numpy(np.expand_dims(action, axis=1)).long()
-            return self._run_critic_heads(h, action, detach=True)
+            #action = torch.from_numpy(np.expand_dims(action, axis=1)).long()
+            return self._run_critic_heads(h, action)
 
     def _get_comm_s(self, i, n_n, x, h, p):
-        js = torch.from_numpy(np.where(self.neighbor_mask[i])[0]).long()
+        print ("Insid get_comm_s : n_n, x, h, p ", n_n, x.shape, h.shape, p.shape) 
+        js = torch.from_numpy(np.where(self.neighbor_mask[i])[0]).long().to(device)
         m_i = torch.index_select(h, 0, js).view(1, self.n_h * n_n)
         p_i = torch.index_select(p, 0, js)
         nx_i = torch.index_select(x, 0, js)
+        print ("DIms comm S m_i, p_i, nx_i", m_i.shape, p_i.shape, nx_i.shape)
         p_i = p_i.view(1, self.n_a * n_n)
         nx_i = nx_i.view(1, self.n_s * n_n)
+        print ("After DIms comm p_i, nx_i", p_i.shape, nx_i.shape)
         s_i = [F.relu(self.fc_x_layers[i](torch.cat([x[i].unsqueeze(0), nx_i], dim=1))),
                F.relu(self.fc_p_layers[i](p_i)),
                F.relu(self.fc_m_layers[i](m_i))]
@@ -1073,16 +1217,17 @@ class NCMultiAgentPolicyCentralized(BasePolicy):
             self._init_critic_head(n_na)
 
     def _reset(self):
-        self.states_fw = torch.zeros(self.n_agent, self.n_h * 2)
-        self.states_bw = torch.zeros(self.n_agent, self.n_h * 2)
+        self.states_fw = torch.zeros(self.n_agent, self.n_h * 2).to(device)
+        self.states_bw = torch.zeros(self.n_agent, self.n_h * 2).to(device)
 
     def _run_actor_heads(self, hs, detach=False):
         ps = []
+        print ("Actor heads ", hs.shape)
         for i in range(self.n_agent):
             if detach:
-                p_i = F.softmax(self.actor_heads[i](hs[i]), dim=1).squeeze().detach()
+                p_i = F.softmax(self.actor_heads[i](hs[i])).squeeze().detach()
             else:
-                p_i = F.log_softmax(self.actor_heads[i](hs[i]), dim=1)
+                p_i = F.log_softmax(self.actor_heads[i](hs[i]))
             ps.append(p_i)
         return ps
 
@@ -1103,40 +1248,49 @@ class NCMultiAgentPolicyCentralized(BasePolicy):
                     s_i = self._get_comm_s(i, n_n, x, h, p)
                 else:
                     s_i = F.relu(self.fc_x_layers[i](x[i].unsqueeze(0)))
+                print ("S-i dim ", s_i.shape)
                 h_i, c_i = h[i].unsqueeze(0) * (1-done), c[i].unsqueeze(0) * (1-done)
+                print ("h_i, c_i ", h_i.shape, c_i.shape)
                 next_h_i, next_c_i = self.lstm_layers[i](s_i, (h_i, c_i))
+                print ("next_h_i, next_c_i ", next_h_i.shape, next_c_i.shape)
                 next_h.append(next_h_i)
                 next_c.append(next_c_i)
             h, c = torch.cat(next_h), torch.cat(next_c)
-            outputs.append(h.unsqueeze(0))
+            print ("AFter append h, c ", h.shape, c.shape)
+            outputs.append(h)
         outputs = torch.cat(outputs)
-        return outputs.transpose(0, 1), torch.cat([h, c], dim=1)
+        print ("Outputs ", outputs.shape)
+        #return outputs.transpose(0, 1), torch.cat([h, c], dim=1)
+        return outputs, torch.cat([h, c], dim=1)
 
     def _run_critic_heads(self, hs, actions, detach=False):
         vs = []
+        print ("RUn critic heads hs, actions ", hs.shape, actions.shape)
         for i in range(self.n_agent):
             n_n = self.n_n_ls[i]
             if n_n:
-                js = torch.from_numpy(np.where(self.neighbor_mask[i])[0]).long()
+                js = torch.from_numpy(np.where(self.neighbor_mask[i])[0]).long().to(device)
                 na_i = torch.index_select(actions, 0, js)
+                print ("na_i shape for i ", i, na_i.shape)
                 na_i_ls = []
                 for j in range(n_n):
-                    na_i_ls.append(one_hot(na_i[j], self.na_ls_ls[i][j]))
-                h_i = torch.cat([hs[i]] + na_i_ls, dim=1)
+                    na_i_ls.append(na_i[j])
+                print ("Before h_i cat hs[i] na_i_ls ", hs[i].shape, na_i_ls[0].shape) 
+                h_i = torch.cat([hs[i]] + na_i_ls)
             else:
                 h_i = hs[i]
             v_i = self.critic_heads[i](h_i).squeeze()
             if detach:
-                vs.append(v_i.detach().cpu().numpy())
+                vs.append(v_i.detach())
             else:
-                vs.append(v_i.cpu())
+                vs.append(v_i)
         return vs
 
 
 class ConsensusPolicyCentralized(NCMultiAgentPolicyCentralized):
-    def __init__(self, n_s, n_a, n_agent, neighbor_mask, n_fc=64, n_h=64,
+    def __init__(self, n_s, n_a, n_agent, neighbor_mask, n_fc=64, n_h=64, n_lstm=64, name='con_cen',
                  n_s_ls=None, n_a_ls=None):
-        BasePolicy.__init__(self, n_a, n_s, 'cu_cen')
+        BasePolicyCentralized.__init__(self, n_s, n_a, n_agent, name, n_fc, n_lstm, n_h, neighbor_mask)
         self.n_agent = n_agent
         self.neighbor_mask = neighbor_mask
         self.n_fc = n_fc
@@ -1205,9 +1359,9 @@ class CommNetMultiAgentPolicyCentralized(NCMultiAgentPolicyCentralized):
     """Reference code: https://github.com/IC3Net/IC3Net/blob/master/comm.py.
        Note in CommNet, the message is generated from hidden state only, so current state
        and neigbor policies are not included in the inputs."""
-    def __init__(self, n_s, n_a, n_agent, neighbor_mask, n_fc=64, n_h=64,
+    def __init__(self, n_s, n_a, n_agent, neighbor_mask, n_fc=64, n_h=64, n_lstm=64, name='cnet_cen',
                  n_s_ls=None, n_a_ls=None):
-        BasePolicy.__init__(self, n_a, n_s, 'cnet_cen')
+        BasePolicyCentralized.__init__(self, n_s, n_a, n_agent, name, n_fc, n_lstm, n_h, neighbor_mask)
         self.n_agent = n_agent
         self.neighbor_mask = neighbor_mask
         self.n_fc = n_fc
@@ -1231,7 +1385,7 @@ class CommNetMultiAgentPolicyCentralized(NCMultiAgentPolicyCentralized):
         self.lstm_layers.append(lstm_layer)
 
     def _get_comm_s(self, i, n_n, x, h, p):
-        js = torch.from_numpy(np.where(self.neighbor_mask[i])[0]).long()
+        js = torch.from_numpy(np.where(self.neighbor_mask[i])[0]).long().to(device)
         m_i = torch.index_select(h, 0, js).mean(dim=0, keepdim=True)
         nx_i = torch.index_select(x, 0, js)
         nx_i = nx_i.view(1, self.n_s * n_n)
@@ -1240,9 +1394,9 @@ class CommNetMultiAgentPolicyCentralized(NCMultiAgentPolicyCentralized):
 
 
 class DIALMultiAgentPolicyCentralized(NCMultiAgentPolicyCentralized):
-    def __init__(self, n_s, n_a, n_agent, neighbor_mask, n_fc=64, n_h=64,
+    def __init__(self, n_s, n_a, n_agent, neighbor_mask, n_fc=64, n_h=64, n_lstm=64, name='dial_cen',
                  n_s_ls=None, n_a_ls=None):
-        BasePolicy.__init__(self, n_a, n_s, 'dial_cen')
+        BasePolicyCentralized.__init__(self, n_s, n_a, n_agent, name, n_fc, n_lstm, n_h, neighbor_mask)
         self.n_agent = n_agent
         self.neighbor_mask = neighbor_mask
         self.n_fc = n_fc
@@ -1252,25 +1406,25 @@ class DIALMultiAgentPolicyCentralized(NCMultiAgentPolicyCentralized):
         self.to(device)
 
     def _init_comm_layer(self, n_n, n_ns, n_na):
-        fc_x_layer = nn.Linear(n_ns, self.n_fc)
+        fc_x_layer = nn.Linear(n_ns, self.n_a)
         init_layer(fc_x_layer, 'fc')
         self.fc_x_layers.append(fc_x_layer)
         if n_n:
-            fc_m_layer = nn.Linear(self.n_h*n_n, self.n_fc)
+            fc_m_layer = nn.Linear(self.n_h*n_n, self.n_a)
             init_layer(fc_m_layer, 'fc')
             self.fc_m_layers.append(fc_m_layer)
         else:
             self.fc_m_layers.append(None)
-        lstm_layer = nn.LSTMCell(self.n_fc, self.n_h)
+        lstm_layer = nn.LSTMCell(self.n_a, self.n_h)
         init_layer(lstm_layer, 'lstm')
         self.lstm_layers.append(lstm_layer)
 
     def _get_comm_s(self, i, n_n, x, h, p):
-        js = torch.from_numpy(np.where(self.neighbor_mask[i])[0]).long()
+        js = torch.from_numpy(np.where(self.neighbor_mask[i])[0]).long().to(device)
         m_i = torch.index_select(h, 0, js).view(1, self.n_h * n_n)
         nx_i = torch.index_select(x, 0, js)
         nx_i = nx_i.view(1, self.n_s * n_n)
-        a_i = one_hot(p[i].argmax().unsqueeze(0), self.n_fc)
+        a_i = p[i]
         return F.relu(self.fc_x_layers[i](torch.cat([x[i].unsqueeze(0), nx_i], dim=1))) + \
                F.relu(self.fc_m_layers[i](m_i)) + a_i
 
@@ -1417,9 +1571,12 @@ class Agent(object):
             except:
                 print(traceback.format_exc())
                 print(sys.exc_info()[2])
-            
-            if self.view.resume == True:
-                self.load_model()
+        elif self.view.strategy_name in ['RL_DEC_1']:
+            self.ps = np.full((len(self.view.model.library)), 1.0, dtype=float)
+            self.ps = torch.from_numpy(self.ps/np.sum(self.ps)).float().to(device)
+
+        if self.view.resume == True:
+            self.load_model()
 
         if self.view.strategy_name in ['RL_DEC_2F', 'RL_DEC_2D']:
             self.avg_reward2 = 0.0
@@ -1883,10 +2040,14 @@ class NetworkView(object):
         self.model_path = model_path
         self.resume = resume
         self.count = 0
-        self.centralized = False
+        self.centralized = True
         self.common_rewards = 0
+        # 0 - all agents delay , 1 - cache hit , 2 - only agents delay
+        self.reward_type = 1
+        self.spatio_rewards = True
         self.tot_delay = 0
         self.fetch_delay = 0
+        self.alpha = 0.8
         self.strategy_name = strategy_name
         #Different because other library is a set, here we want to preserve ordering
         self.lib = [item for item in range(0, len(self.model.library))]
@@ -1922,21 +2083,27 @@ class NetworkView(object):
         self.state_ver = nnp['state_ver']
         self.policy_type = nnp['policy_type']
         self.comb = nnp['comb']
+        self.nnp = nnp
         #Creating agents depending on the total number of routers
         for r in self.model.routers:
             self.agents.append(Agent(self, r, self.state_ver, self.policy_type, nnp['gamma'], nnp['lr'], nnp['window'], nnp['comb'],
                                 nnp['tau'], nnp['beta'], nnp['use_gae'], nnp['avg_reward_case']))
         
         if self.centralized == True and strategy_name in ['RL_DEC_1']:
+            self.avg_reward = 0.0
+            if self.policy_type == 2:
+                self.policy = GATPolicyCentralized(len(self.model.library), len(self.model.library), 64, len(self.model.routers))
             if self.policy_type == 4:
-                self.policy = NCMultiAgentPolicyCentralized(len(self.model.library), len(self.model.library), len(self.model.routers), neighbor_mask)
+                self.policy = NCMultiAgentPolicyCentralized(len(self.model.library), len(self.model.library), len(self.model.routers), self.model.neighbor_mask)
             if self.policy_type == 5:
-                self.policy = ConsensusPolicyCentralized(len(self.model.library), len(self.model.library), len(self.model.routers), neighbor_mask)
+                self.policy = ConsensusPolicyCentralized(len(self.model.library), len(self.model.library), len(self.model.routers), self.model.neighbor_mask)
             if self.policy_type == 6:
-                self.policy = CommNetMultiAgentPolicyCentralized(len(self.model.library), len(self.model.library), len(self.model.routers), neighbor_mask)
+                self.policy = CommNetMultiAgentPolicyCentralized(len(self.model.library), len(self.model.library), len(self.model.routers), self.model.neighbor_mask)
             if self.policy_type == 7:
-                self.policy = DIALMultiAgentPolicyCentralized(len(self.model.library), len(self.model.library), len(self.model.routers), neighbor_mask)
-
+                self.policy = DIALMultiAgentPolicyCentralized(len(self.model.library), len(self.model.library), len(self.model.routers), self.model.neighbor_mask)
+            self.eps = np.finfo(np.float32).eps.item()
+            self.optimizer = optim.Adam(self.policy.parameters(), lr=nnp['lr'])
+            
         if strategy_name in ['RL_DEC_1']:
             self.agents_per_thread = int(len(self.agents)/cpus)
             self.extra_agents = len(self.agents) % cpus
@@ -1999,6 +2166,178 @@ class NetworkView(object):
         #print("Neighbor actions ", actions) 
         return actions
 
+    def decode_action(self, action):
+        """
+        Decode the action and return a vector of binary values signifying which caches
+        should cache what content
+        """
+        action_decoded = np.full((len(self.model.library)), 0, dtype=int)
+        if self.state_ver == 1:
+            files_to_cache = self.valid_action[action[0]]
+            files_to_cache = list(files_to_cache)
+            #print ("Files to cache", files_to_cache)
+            for f in files_to_cache:
+                action_decoded[f] = 1
+        else:
+            for a in action:
+                action_decoded[a] = 1
+        #print ("Action decoded", action_decoded)
+        return action_decoded
+
+    def get_policy(self, ob, ps=None):
+        """
+        ob - set of states of itself as well as neighbor in case of ma2c policies
+        ps - fingerprints of neighbors
+        """
+        
+        done = np.array([0])
+        if self.policy_type in [4,5,6,7]:
+            policy = self.policy.forward(ob, done, ps)
+        elif self.policy_type in [2]:
+            policy = self.policy.forward(ob, done, self.model.neighbor_mask)
+        else:
+            policy = self.policy.forward(ob, done)
+        return policy
+
+    def get_value(self, ob, action=None, ps=None):
+        """
+        ps - neighbor fingerprint
+        action - array of actions in case of ma2c
+        ob - set of states of itself as well as neighbors in case of ma2c policies
+        """
+        
+        done = np.array([0])
+        if self.policy_type in [4,5,6,7]:
+            value = self.policy.forward(ob, done, ps, action, 'v')
+        elif self.policy_type in [2]:
+            value = self.policy.forward(ob, done, self.model.neighbor_mask, action, 'v')
+        else:
+            value = self.policy.forward(ob, done, None, 'v')
+        return value
+
+    def select_actions(self, state, ps):
+        #print ("STATE", state)
+        #ob = torch.from_numpy(np.expand_dims(ob, axis=0)).float()
+        # States should consider neighboring states + policies of neighbors
+        actions = []
+        state = torch.stack([x for x in state]).to(device)
+        ps = torch.stack([p for p in ps]).to(device)
+        top_k_val = [0] * len(self.agents)
+        top_k_inx = [0] * len(self.agents)
+        # Maybe one step late (no sync)
+        probs = self.get_policy(state, ps)
+        print ("PROBS ", probs, probs[0].shape)
+        # Adding the fingerprint
+        for i in range(len(self.agents)):
+            self.agents[i].ps = probs[i]
+            #print ("PROBS", probs.shape)
+            # create categorical distribution over list of probabilities of actions
+            m = Categorical(probs[i])
+            #print ("Output of NN ")
+            print (m)
+            # sample an action from the categorical distribution
+            # Select top k values from probability softmax output
+            top_k_val[i], top_k_inx[i] = probs[i].topk(self.model.cache_size[self.model.routers[i]])
+            action = self.decode_action(top_k_inx[i].cpu().detach().numpy())
+            self.action = torch.from_numpy(np.array(action)).float().to(device)
+            actions.append(self.action)
+        actions = torch.stack([a for a in actions]).to(device)
+        state_value = self.get_value(state, actions, ps)
+        for i in range(len(self.agents)):
+            for ac in top_k_inx[i]:
+                self.policy.saved_actions.append(SavedAction(m.log_prob(ac), state_value[i]))
+        print ("Value ", state_value)
+        return actions
+
+    def update(self):
+        """
+
+        Training code. Calculates actor and critic loss and performn backpropogation.
+        """
+        print ("UPDATE FN ")
+        R = 0
+        saved_actions = self.policy.saved_actions
+        #print ("Saved Actions", saved_actions)
+        policy_losses = [] # list to save actor (policy) loss
+        value_losses = [] # list to save critic (policy) loss
+        returns = [] # list to save true values
+
+        # calculate the true value using rewards returned from the environment
+        # this reward is appended by the environment 
+        c = 0
+        for r in self.policy.rewards[::-1]:
+            # calculate the discounted value
+            # Rewards are same for multiple actions, hence compute R only once & use it for all actions taken simultaneously
+            if self.strategy_name in ['RL_DEC_1']:
+                if c % self.model.cache_size[self.model.routers[0]] == 0:
+                    if self.nnp['avg_reward_case']:
+                        R = R + r - self.avg_reward
+                        if c != 0:
+                            # We dont have the next state here again, hence we do this update for c = 0
+                            self.avg_reward = self.nnp['beta'] * (saved_actions[len(self.policy.rewards) - c][1] - saved_actions[len(self.policy.rewards) - c - 1][1])
+                    else:
+                        R = r + self.nnp['gamma'] * R
+            c += 1
+            returns.insert(0, R)
+        print ("Returns ",  returns, len(saved_actions))
+        returns = torch.tensor(returns, device=device)
+        # Already normalised, don't do anything here
+        returns = (returns - returns.mean()) / (returns.std() + self.eps)
+        #print ("Returns ", self.cache, returns)
+        #print ("RETURNS LEN", self.cache, len(returns))
+
+        #print ("SAVED ACTIONS LEN", len(saved_actions))
+        advantage = torch.tensor(np.zeros((1)), device=device)
+        if self.nnp['use_gae']:
+            for i in reversed(range(len(saved_actions))):
+                # This is the last set of values saved, we dont have i + cache_size for this
+                # We don't have the next state available immidiately, hence we cannot estimate the value function of next state
+                if i >= len(saved_actions) - self.model.cache_size[self.model.routers[0]]:
+                    td_error = self.policy.rewards[i] - saved_actions[i][1]
+                    advantage = td_error
+                else:
+                    # Do it only one once
+                    if i % self.model.cache_size[self.model.routers[0]] == 0:
+                        td_error = self.policy.rewards[i] + self.nnp['gamma'] * saved_actions[i + self.model.cache_size[self.model.routers[0]]][1] - saved_actions[i][1]
+                        advantage = advantage * self.tau * self.nnp['gamma'] + td_error
+                # calculate actor (policy) loss
+                policy_losses.append(-saved_actions[i][0] * advantage)
+                # calulate critic (value) loss using L1 smooth loss
+                value_losses.append(F.smooth_l1_loss(saved_actions[i][0], torch.tensor([returns[i]], device=device)))
+        else:
+            for (log_prob, value), R in zip(saved_actions, returns):
+                advantage = R - value.item()
+                # calculate actor (policy) loss
+                policy_losses.append(-log_prob * advantage)
+                # calulate critic (value) loss using L1 smooth loss
+                value_losses.append(F.smooth_l1_loss(value, torch.tensor([R], device=device)))
+        
+        #print ("Policy Loss ", policy_losses)
+        #print ("Value Loss ", value_losses)
+        # reset gradients
+        self.optimizer.zero_grad()
+        #print ("Optimizer gradient")
+        # sum up all the values of policy_losses and value_losses
+        loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum()
+        #print ("Total Loss ", loss)
+        # perform backprop
+        loss.backward(retain_graph=True)
+        #loss.backward()
+        #print ("Backprop Loss")
+        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
+        #print ("Gradients Clip")
+        self.optimizer.step()
+        #print ("Optimizer Step")
+        # reset rewards and action buffers
+        # We dont want to reset it as we want the hidden layers to be preserved
+        """
+        if self.policy_type == 1:
+            self.a_hx = torch.zeros(self.hidden_state).unsqueeze(0).unsqueeze(0).to(device);
+            self.a_cx = torch.zeros(self.hidden_state).unsqueeze(0).unsqueeze(0).to(device);
+        """
+        del self.policy.rewards[:]
+        del self.policy.saved_actions[:]
+        #print ("Deleted policy and saved actions")
 
     def content_locations(self, k):
         """Return a set of all current locations of a specific content.
@@ -2361,11 +2700,23 @@ class NetworkModel(object):
                 if self.cache_size[node] < 1:
                     self.cache_size[node] = 1
         print ("ROUTERS", self.routers)
+        self.neighbor_mask = np.zeros((len(self.routers), len(self.routers)), dtype=int)
+        self.distance_mask = np.zeros((len(self.routers), len(self.routers)), dtype=float)
         for r in self.routers:
             path_lengths = nx.single_source_dijkstra_path_length(topology, r)
             self.neighbor[r] = [v for v, length in path_lengths.items() \
                 if length <= self.neighbor_distance and v in self.routers and v !=r]
             print ("Neighbor for node ", r, " is ", self.neighbor[r])
+        for i in range(len(self.routers)):
+            v = self.neighbor[self.routers[i]]
+            dist_len = nx.single_source_dijkstra_path_length(topology, self.routers[i])
+            print ("DIst len ", i, dist_len)
+            for j in range(len(self.routers)):
+                self.distance_mask[i, j] = dist_len[self.routers[j]] 
+                if self.routers[j] in v:
+                    self.neighbor_mask[i, j] = 1
+        print ("Neighbor mask = ", self.neighbor_mask)
+        print ("Distance mask = ", self.distance_mask)
         policy_name = cache_policy['name']
         policy_args = {k: v for k, v in cache_policy.items() if k != 'name'}
         # The actual cache objects storing the content

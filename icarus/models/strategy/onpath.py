@@ -438,7 +438,7 @@ class RlDec1(Strategy):
         2. select actions
         3. perform the actions
         """
-        #print ("ENV STEP")
+        print ("ENV STEP ", inx)
         curr_state = []
         ps = []
         for i in range(len(self.view.agents)):
@@ -446,7 +446,6 @@ class RlDec1(Strategy):
             ps.append(self.view.agents[i].ps)
         actions = self.view.select_actions(curr_state, ps)
         print ("ENv Step : ", actions)
-        lock.acquire()
         for i in range(len(self.view.agents)):
             rew = self.perform_action(actions[i], self.view.agents[i].cache, size, inx, lock)
             if self.view.reward_type == 1:
@@ -455,7 +454,6 @@ class RlDec1(Strategy):
                 self.view.agents[i].rewards -= rew
                 if log == True:
                     self.view.fetch_delay += (rew * 2)
-        lock.release()
     
     def update_gradients(self, inx):
         """
@@ -569,7 +567,12 @@ class RlDec1(Strategy):
         #if self.view.count % 50 == 0:
         if count % self.view.update_freq == 0:
             if self.view.centralized == True:
-                self.env_step_cen(size, inx, lock, log)
+                barrier.wait()
+                lock.acquire()
+                if self.view.step == False:
+                    self.env_step_cen(size, inx, lock, log)
+                    self.view.step = True
+                lock.release()
             else:
                 self.env_step(size, inx, lock, log) 
         # Get location of all nodes that has the content stored
@@ -639,13 +642,19 @@ class RlDec1(Strategy):
                 self.view.agents[i].rewards *= 0
                 #print ("TYPE 2" , type(self.view.agents[agent_inx].state_counts))
             barrier.wait()
+            self.view.step = False
             self.view.common_rewards *= 0
             barrier.wait()
 
         if count % (self.view.update_freq * 50) == 0:
             #self.view.agents[i].state_counts *= 0
             if self.view.centralized == True:
-                self.update_gradients_cen(inx)
+                barrier.wait()
+                lock.acquire()
+                if self.view.step == False:
+                    self.update_gradients_cen(inx)
+                    self.view.step = True
+                lock.release()
             else:
                 self.update_gradients(inx)
         if count % (self.view.update_freq * 100) == 0:

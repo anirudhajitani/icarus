@@ -827,7 +827,7 @@ class NCMultiAgentPolicy(BasePolicy):
         v_i = self.critic_head(h_i).squeeze()
         if detach:
             v_i = v_i.detach()
-        print ("Critic head op shape", v_i.shape)
+        print ("Critic head op shape", v_i.shape, type(v_i))
         return v_i
 
 class CommNetMultiAgentPolicy(NCMultiAgentPolicy):
@@ -1739,7 +1739,7 @@ class Agent(object):
                 probs, state_value = self.policy.forward(state)
             elif self.policy_type == 2:
                 state = torch.stack([x for x in state]).to(device)
-                print ("State = ", state, state.shape)
+                #print ("State = ", state, state.shape)
                 probs, state_value = self.policy.forward(state)
             else:
                 state = torch.from_numpy(state).float().unsqueeze(0).unsqueeze(0).to(device)
@@ -1750,7 +1750,7 @@ class Agent(object):
                 probs = self.get_policy(state)
             elif self.policy_type in [2]:
                 state = torch.stack([x for x in state]).to(device)
-                print ("State = ", state.shape)
+                #print ("State = ", state.shape)
                 probs = self.get_policy(state)
             elif self.policy_type in [3]:
                 neigh_ps = self.view.get_neighbor_policy(self.cache)
@@ -1759,7 +1759,7 @@ class Agent(object):
                 state = torch.flatten(state)
                 state = torch.cat([state, neigh_ps])
                 state = torch.flatten(state)
-                print ("State = ", state.shape)
+                #print ("State = ", state.shape)
                 probs = self.get_policy(state)
             elif self.policy_type in [4,6,7]:
                # States should consider neighboring states + policies of neighbors
@@ -1773,7 +1773,7 @@ class Agent(object):
         # create categorical distribution over list of probabilities of actions
         m = Categorical(probs)
         #print ("Output of NN ")
-        print (m)
+        #print (m)
         # sample an action from the categorical distribution
         # Select top k values from probability softmax output
         if self.state_ver == 0 or self.state_ver == 2 and self.view.strategy_name in ['RL_DEC_1']:
@@ -1801,7 +1801,7 @@ class Agent(object):
                 state_value = self.get_value(state, actions, neigh_ps)
             for ac in top_k_inx:
                 self.policy.saved_actions.append(SavedAction(m.log_prob(ac), state_value))
-            print ("Value ", state_value, state_value.shape)
+            #print ("Value ", state_value, state_value.shape)
             return action
         #print ("TOP K INDEX", top_k_inx, type(top_k_inx))
         #print ("TOP K VAL", top_k_val)
@@ -1906,6 +1906,7 @@ class Agent(object):
                 # calculate actor (policy) loss
                 policy_losses.append(-saved_actions[i][0] * advantage)
                 # calulate critic (value) loss using L1 smooth loss
+                print ("Value, R", saved_actions[i][0], returns[i])
                 value_losses.append(F.smooth_l1_loss(saved_actions[i][0], torch.tensor([returns[i]], device=device)))
         else:
             for (log_prob, value), R in zip(saved_actions, returns):
@@ -1913,6 +1914,7 @@ class Agent(object):
                 # calculate actor (policy) loss
                 policy_losses.append(-log_prob * advantage)
                 # calulate critic (value) loss using L1 smooth loss
+                print ("Value, R", value, R)
                 value_losses.append(F.smooth_l1_loss(value, torch.tensor([R], device=device)))
         
         #print ("Policy Loss ", policy_losses)
@@ -2040,7 +2042,8 @@ class NetworkView(object):
         self.model_path = model_path
         self.resume = resume
         self.count = 0
-        self.centralized = True
+        self.centralized = False
+        self.step = False
         self.common_rewards = 0
         # 0 - all agents delay , 1 - cache hit , 2 - only agents delay
         self.reward_type = 1
@@ -2245,7 +2248,7 @@ class NetworkView(object):
         state_value = self.get_value(state, actions, ps)
         for i in range(len(self.agents)):
             for ac in top_k_inx[i]:
-                self.policy.saved_actions.append(SavedAction(m.log_prob(ac), state_value[i]))
+                self.policy.saved_actions.append(SavedAction(m.log_prob(ac), state_value[i][0]))
         print ("Value ", state_value)
         return actions
 
@@ -2279,15 +2282,17 @@ class NetworkView(object):
                         R = r + self.nnp['gamma'] * R
             c += 1
             returns.insert(0, R)
-        print ("Returns ",  returns, len(saved_actions))
+        print ("Rewards ", len(self.policy.rewards))
+        print ("Saved actions ", len(saved_actions), saved_actions[0][0], saved_actions[0][1])
         returns = torch.tensor(returns, device=device)
         # Already normalised, don't do anything here
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
         #print ("Returns ", self.cache, returns)
         #print ("RETURNS LEN", self.cache, len(returns))
+        print ("Returns ",  len(saved_actions), returns[0])
 
         #print ("SAVED ACTIONS LEN", len(saved_actions))
-        advantage = torch.tensor(np.zeros((1)), device=device)
+        advantage = torch.tensor(np.zeros(1, dtype=float), device=device)
         if self.nnp['use_gae']:
             for i in reversed(range(len(saved_actions))):
                 # This is the last set of values saved, we dont have i + cache_size for this
@@ -2299,18 +2304,20 @@ class NetworkView(object):
                     # Do it only one once
                     if i % self.model.cache_size[self.model.routers[0]] == 0:
                         td_error = self.policy.rewards[i] + self.nnp['gamma'] * saved_actions[i + self.model.cache_size[self.model.routers[0]]][1] - saved_actions[i][1]
-                        advantage = advantage * self.tau * self.nnp['gamma'] + td_error
+                        advantage = advantage * self.nnp['tau'] * self.nnp['gamma'] + td_error
                 # calculate actor (policy) loss
+                print ("Value, R", saved_actions[i][0], returns[i])
                 policy_losses.append(-saved_actions[i][0] * advantage)
                 # calulate critic (value) loss using L1 smooth loss
-                value_losses.append(F.smooth_l1_loss(saved_actions[i][0], torch.tensor([returns[i]], device=device)))
+                value_losses.append(F.smooth_l1_loss(saved_actions[i][0], torch.tensor(returns[i], device=device)))
         else:
             for (log_prob, value), R in zip(saved_actions, returns):
                 advantage = R - value.item()
                 # calculate actor (policy) loss
                 policy_losses.append(-log_prob * advantage)
                 # calulate critic (value) loss using L1 smooth loss
-                value_losses.append(F.smooth_l1_loss(value, torch.tensor([R], device=device)))
+                print ("Value, R", value, R)
+                value_losses.append(F.smooth_l1_loss(value, torch.tensor(R, device=device)))
         
         #print ("Policy Loss ", policy_losses)
         #print ("Value Loss ", value_losses)
@@ -2319,7 +2326,8 @@ class NetworkView(object):
         #print ("Optimizer gradient")
         # sum up all the values of policy_losses and value_losses
         loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum()
-        #print ("Total Loss ", loss)
+        loss = loss.type(torch.cuda.DoubleTensor)
+        print ("Total Loss ", loss)
         # perform backprop
         loss.backward(retain_graph=True)
         #loss.backward()

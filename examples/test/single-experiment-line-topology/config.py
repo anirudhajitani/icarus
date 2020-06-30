@@ -80,14 +80,14 @@ experiment['nnp']['window'] = 200
 experiment['nnp']['lr'] = 0.0015
 experiment['nnp']['gamma'] = 0.9
 experiment['nnp']['index_threshold_f'] = experiment['topology']['delay']
-experiment['nnp']['policy_type'] = 2
+experiment['nnp']['policy_type'] = 6
 experiment['nnp']['state_ver'] = 0
 experiment['nnp']['index_threshold_d'] = (experiment['topology']['delay'] / experiment['workload']['n_contents']) * 2
 experiment['nnp']['tau'] = 0.95
 experiment['nnp']['update_freq'] = 10
 experiment['nnp']['beta'] = 0.001
-experiment['nnp']['use_gae'] = True
-experiment['nnp']['avg_reward_case'] = True
+experiment['nnp']['use_gae'] = False
+experiment['nnp']['avg_reward_case'] = False
 
 # Set cache placement
 experiment['cache_placement']['name'] = 'UNIFORM'

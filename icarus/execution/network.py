@@ -592,6 +592,7 @@ class FPPolicy(BaseLstmPolicy):
         self._init_net()
 
     def _init_net(self):
+        print ("INIT FFP")
         self.n_x = self.n_s - self.n_n * self.n_a
         self.fc_x_layer = nn.Linear(self.n_x, self.n_fc)
         init_layer(self.fc_x_layer, 'fc')
@@ -714,6 +715,7 @@ class NCMultiAgentPolicy(BasePolicy):
         print ("After run_comm_layers h, new_states ", h.shape, new_states.shape)
         if out_type.startswith('p'):
             self.states_fw = new_states.detach()
+            #self.states_fw = new_states
             return self._run_actor_heads(h)
         else:
             #action = torch.from_numpy(np.expand_dims(action, axis=1)).long()
@@ -767,6 +769,7 @@ class NCMultiAgentPolicy(BasePolicy):
         init_layer(self.critic_head, 'fc')
 
     def _init_net(self):
+        print ("INIT NCM")
         n_n, n_ns, n_na, ns_ls, na_ls = self._get_neighbor_dim()
         self._init_comm_layer(n_n, n_ns, n_na)
         n_a = self.n_a 
@@ -778,6 +781,7 @@ class NCMultiAgentPolicy(BasePolicy):
         self.states_bw = torch.zeros(1, self.n_n * self.n_h * 2).to(device)
 
     def _run_actor_heads(self, hs, detach=False):
+        print ("RUN ACTOR HEAD ", self)
         if detach:
             ps = F.softmax(self.actor_head(hs), dim=-1).squeeze().detach()
         else:
@@ -1906,7 +1910,7 @@ class Agent(object):
                 # calculate actor (policy) loss
                 policy_losses.append(-saved_actions[i][0] * advantage)
                 # calulate critic (value) loss using L1 smooth loss
-                print ("Value, R", saved_actions[i][0], returns[i])
+                print ("Value, R", saved_actions[i][0], torch.tensor([returns[i]], device=device))
                 value_losses.append(F.smooth_l1_loss(saved_actions[i][0], torch.tensor([returns[i]], device=device)))
         else:
             for (log_prob, value), R in zip(saved_actions, returns):
@@ -1914,7 +1918,7 @@ class Agent(object):
                 # calculate actor (policy) loss
                 policy_losses.append(-log_prob * advantage)
                 # calulate critic (value) loss using L1 smooth loss
-                print ("Value, R", value, R)
+                print ("Value, R", value, torch.tensor([R], device=device))
                 value_losses.append(F.smooth_l1_loss(value, torch.tensor([R], device=device)))
         
         #print ("Policy Loss ", policy_losses)
@@ -2218,6 +2222,46 @@ class NetworkView(object):
             value = self.policy.forward(ob, done, None, 'v')
         return value
 
+    def save_model(self, count):
+        """
+        Save NN model parameters 
+        """
+        PATH = self.model_path
+        if PATH is not None:
+            PATH = PATH + "/" + str(self.strategy_name) + ".pt"
+        else:
+            PATH = str(self.strategy_name) + ".pt"
+            torch.save({
+                'epoch': count,
+                'model_state_dict': self.policy.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                }, PATH)
+        print ("Saved Model to ", PATH)
+
+    def load_model(self):
+        """
+        Load NN model and initialise them
+        """
+        PATH = self.model_path
+        if PATH is not None:
+            PATH = PATH + "/" + str(self.strategy_name) + ".pt"
+        else:
+            PATH = str(self.strategy_name) + ".pt"
+        try:
+            checkpoint = torch.load(PATH)
+        except:
+            print ("CHECKPOINT not present.. Cannot LOAD Model")
+            return
+        print ("LOADING MODELS previously stored")
+        #print ("MODEL : ", checkpoint['model_state_dict'])
+        #print ("OPTIM : ", checkpoint['optimizer_state_dict'])
+        try:
+            self.policy.load_state_dict(checkpoint['model_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            self.count = checkpoint['epoch']
+        except:
+            print ("Saved Model does not match the Policy")
+    
     def select_actions(self, state, ps):
         #print ("STATE", state)
         #ob = torch.from_numpy(np.expand_dims(ob, axis=0)).float()
@@ -2248,7 +2292,7 @@ class NetworkView(object):
         state_value = self.get_value(state, actions, ps)
         for i in range(len(self.agents)):
             for ac in top_k_inx[i]:
-                self.policy.saved_actions.append(SavedAction(m.log_prob(ac), state_value[i][0]))
+                self.policy.saved_actions.append(SavedAction(m.log_prob(ac), state_value[i]))
         print ("Value ", state_value)
         return actions
 
@@ -2282,14 +2326,14 @@ class NetworkView(object):
                         R = r + self.nnp['gamma'] * R
             c += 1
             returns.insert(0, R)
-        print ("Rewards ", len(self.policy.rewards))
-        print ("Saved actions ", len(saved_actions), saved_actions[0][0], saved_actions[0][1])
+        print ("Rewards ", type(self.policy.rewards[0]), self.policy.rewards[0])
+        print ("Saved actions ", type(saved_actions), saved_actions[0][0], saved_actions[0][1])
         returns = torch.tensor(returns, device=device)
         # Already normalised, don't do anything here
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
         #print ("Returns ", self.cache, returns)
         #print ("RETURNS LEN", self.cache, len(returns))
-        print ("Returns ",  len(saved_actions), returns[0])
+        print ("Returns ",  type(returns[0]), returns[0])
 
         #print ("SAVED ACTIONS LEN", len(saved_actions))
         advantage = torch.tensor(np.zeros(1, dtype=float), device=device)
@@ -2309,7 +2353,7 @@ class NetworkView(object):
                 print ("Value, R", saved_actions[i][0], returns[i])
                 policy_losses.append(-saved_actions[i][0] * advantage)
                 # calulate critic (value) loss using L1 smooth loss
-                value_losses.append(F.smooth_l1_loss(saved_actions[i][0], torch.tensor(returns[i], device=device)))
+                value_losses.append(F.smooth_l1_loss(saved_actions[i][0], torch.tensor([returns[i]], device=device)))
         else:
             for (log_prob, value), R in zip(saved_actions, returns):
                 advantage = R - value.item()
@@ -2317,7 +2361,7 @@ class NetworkView(object):
                 policy_losses.append(-log_prob * advantage)
                 # calulate critic (value) loss using L1 smooth loss
                 print ("Value, R", value, R)
-                value_losses.append(F.smooth_l1_loss(value, torch.tensor(R, device=device)))
+                value_losses.append(F.smooth_l1_loss(value, torch.tensor([R], device=device)))
         
         #print ("Policy Loss ", policy_losses)
         #print ("Value Loss ", value_losses)

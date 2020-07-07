@@ -510,7 +510,7 @@ class RlDec1(Strategy):
                     add_contents.append(a+1)
                 else:
                     if self.view.reward_type == 1:
-                        rew += 1
+                        rew += 1.0
             else:
                 if a+1 in existing_contents:
                     remove_contents.append(a+1)
@@ -612,7 +612,8 @@ class RlDec1(Strategy):
         #print ("DELAY ", serving_node, " , ", min_delay, " DEL ", self.view.tot_delay, " FETCH DELAY ", self.view.fetch_delay, "TOT_DELAY", self.view.tot_delay + self.view.fetch_delay)
         self.view.common_rewards -= min_delay
         if serving_node in self.view.model.routers and self.view.reward_type == 1:
-            self.view.agents[self.view.model.routers.index(serving_node)].rewards += 1
+            print ("CACHE HIT HAPPENED")
+            self.view.agents[self.view.model.routers.index(serving_node)].rewards += 1.0
         #print ("COMMON REW", min_delay, self.view.common_rewards)
         lock.release()
         
@@ -624,11 +625,14 @@ class RlDec1(Strategy):
                 if self.view.reward_type == 0:
                     self.view.agents[i].rewards += (self.view.common_rewards/len(self.view.agents))
                 if self.view.spatio_rewards == True:
+                    print ("BEFORE ", type(self.view.agents[i].rewards))
                     for j in range(len(self.view.model.routers)):
                         # Spatio-temporal rewards
                         if self.view.model.neighbor_mask[i, j] == 1 and i != j and self.view.reward_type == 1:
                             # for delay how to make rewards separate
-                            self.view.agents[i].rewards += self.view.agents[j].rewards * self.view.alpha ** self.view.model.distance_mask[i, j]
+                            # convert to float instead of np.float
+                            self.view.agents[i].rewards += (self.view.agents[j].rewards * self.view.alpha ** self.view.model.distance_mask[i, j]).item()
+                    print ("AFTER ", type(self.view.agents[i].rewards))
                 #self.view.agents[i].rewards += self.view.common_rewards
                 if self.view.agents[i].state_ver == 1:
                     self.view.agents[i].policy.rewards.append(self.view.agents[i].rewards)
@@ -653,6 +657,7 @@ class RlDec1(Strategy):
                 lock.acquire()
                 if self.view.step == False:
                     self.update_gradients_cen(inx)
+                    self.view.save_model(self.view.count)
                     self.view.step = True
                 lock.release()
             else:
@@ -661,7 +666,8 @@ class RlDec1(Strategy):
             #Use barrier here so that the epochs are consistent
             barrier.wait()
             #Use self.view.count here so that this value can be restored on next run
-            self.save_model(inx, self.view.count)
+            if self.view.centralized == False:
+                self.save_model(inx, self.view.count)
             barrier.wait()
 
         # Return content
